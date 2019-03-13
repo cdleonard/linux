@@ -1,1 +1,2 @@
 obj-$(CONFIG_INTERCONNECT_IMX) += imx.o
+obj-$(CONFIG_INTERCONNECT_IMX8MM) += imx8mm.o
