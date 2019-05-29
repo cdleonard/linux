@@ -120,6 +120,24 @@
 			};
 		};
 	};
+
+	ddrc_opp_table: ddrc-opp-table {
+		compatible = "operating-points-v2";
+
+		opp-25M {
+			opp-hz = /bits/ 64 <25000000>;
+		};
+		opp-100M {
+			opp-hz = /bits/ 64 <100000000>;
+		};
+		opp-600M {
+			opp-hz = /bits/ 64 <600000000>;
+		};
+	};
+};
+
+&ddrc {
+	operating-points-v2 = <&ddrc_opp_table>;
 };
 
 &iomuxc {
