@@ -544,6 +544,9 @@ struct fec_enet_private {
 	int	wol_flag;
 	u32	quirks;
 
+	struct	icc_path *icc_path;
+	s32	icc_path_bw;
+
 	struct	napi_struct napi;
 	int	csum_flags;
 
