@@ -62,6 +62,7 @@
 #include <linux/if_vlan.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/prefetch.h>
+#include <linux/interconnect.h>
 #include <soc/imx/cpuidle.h>
 
 #include <asm/cacheflush.h>
@@ -155,6 +156,10 @@ MODULE_DEVICE_TABLE(of, fec_dt_ids);
 static unsigned char macaddr[ETH_ALEN];
 module_param_array(macaddr, byte, NULL, 0);
 MODULE_PARM_DESC(macaddr, "FEC Ethernet MAC address");
+
+/* Pass fec.needs_icc=0 on kernel cmdline */
+static bool fec_needs_icc = true;
+module_param_named(needs_icc, fec_needs_icc, bool, 0644);
 
 #if defined(CONFIG_M5272)
 /*
@@ -3389,6 +3394,39 @@ static int fec_enet_get_irq_cnt(struct platform_device *pdev)
 	return irq_cnt;
 }
 
+static int fec_init_icc(struct platform_device *pdev)
+{
+	struct net_device *ndev = platform_get_drvdata(pdev);
+	struct fec_enet_private *fep = netdev_priv(ndev);
+
+	if (!fec_needs_icc) {
+		pr_info("fec icc hack disabled!\n");
+		return 0;
+	}
+
+	/* Optional interconnect request */
+	fep->icc_path = of_icc_get(&pdev->dev, NULL);
+	if (PTR_ERR(fep->icc_path) == -EPROBE_DEFER) {
+		return -EPROBE_DEFER;
+	} else if (IS_ERR(fep->icc_path))
+		fep->icc_path = NULL;
+
+	/* Optional interconnect request */
+	/* Gigabit Ethernet in KBps */
+	//fep->icc_path_bw = 125000;
+	/* Force DDRC med: */
+	fep->icc_path_bw = 1599999;
+
+	/* Force DDRC high on imx8mq: */
+	fep->icc_path_bw = 678900;
+
+	/* Force DDRC high: */
+	//fep->icc_path_bw = 2000000;
+	icc_set_bw(fep->icc_path, 0, fep->icc_path_bw);
+
+	return 0;
+}
+
 static int
 fec_probe(struct platform_device *pdev)
 {
@@ -3453,6 +3491,10 @@ fec_probe(struct platform_device *pdev)
 
 	if (of_get_property(np, "fsl,magic-packet", NULL))
 		fep->wol_flag |= FEC_WOL_HAS_MAGIC_PACKET;
+
+	ret = fec_init_icc(pdev);
+	if (ret)
+		goto failed_icc;
 
 	phy_node = of_parse_phandle(np, "phy-handle", 0);
 	if (!phy_node && of_phy_is_fixed_link(np)) {
@@ -3623,6 +3665,8 @@ failed_clk:
 		of_phy_deregister_fixed_link(np);
 	of_node_put(phy_node);
 failed_phy:
+	icc_put(fep->icc_path);
+failed_icc:
 	dev_id--;
 failed_ioremap:
 	free_netdev(ndev);
@@ -3648,6 +3692,7 @@ fec_drv_remove(struct platform_device *pdev)
 	if (of_phy_is_fixed_link(np))
 		of_phy_deregister_fixed_link(np);
 	of_node_put(fep->phy_node);
+	icc_put(fep->icc_path);
 	free_netdev(ndev);
 
 	return 0;
@@ -3739,6 +3784,8 @@ static int __maybe_unused fec_runtime_suspend(struct device *dev)
 	struct net_device *ndev = dev_get_drvdata(dev);
 	struct fec_enet_private *fep = netdev_priv(ndev);
 
+	icc_set_bw(fep->icc_path, 0, 0);
+
 	clk_disable_unprepare(fep->clk_ahb);
 	clk_disable_unprepare(fep->clk_ipg);
 
@@ -3757,6 +3804,9 @@ static int __maybe_unused fec_runtime_resume(struct device *dev)
 	ret = clk_prepare_enable(fep->clk_ipg);
 	if (ret)
 		goto failed_clk_ipg;
+
+	if (fec_needs_icc)
+		icc_set_bw(fep->icc_path, 0, fep->icc_path_bw);
 
 	return 0;
 
