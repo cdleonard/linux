@@ -8,6 +8,7 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/thermal/thermal.h>
+#include <dt-bindings/interconnect/imx8mm.h>
 
 #include "imx8mm-pinfunc.h"
 
@@ -779,6 +780,11 @@
 			reg = <0x32700000 0x100000>;
 			clocks = <&clk IMX8MM_CLK_NOC>;
 			devfreq = <&ddrc>;
+			#interconnect-cells = <1>;
+			fsl,scalable-node-ids = <IMX8MM_ICN_NOC>,
+						<IMX8MM_ICS_DRAM>;
+			fsl,scalable-nodes = <&noc>,
+					     <&ddrc>;
 			operating-points-v2 = <&noc_opp_table>;
 
 			noc_opp_table: opp-table {
