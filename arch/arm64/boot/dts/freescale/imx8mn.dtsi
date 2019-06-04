@@ -7,6 +7,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interconnect/imx8mn.h>
 
 #include "imx8mn-pinfunc.h"
 
@@ -689,6 +690,8 @@
 			reg = <0x32700000 0x100000>;
 			clocks = <&clk IMX8MN_CLK_NOC>;
 			devfreq = <&ddrc>;
+			#interconnect-cells = <1>;
+			interconnect-node-id = <IMX8MN_ICN_NOC>;
 			operating-points-v2 = <&noc_opp_table>;
 		};
 
@@ -792,6 +795,7 @@
 				 <&clk IMX8MN_DRAM_PLL>,
 				 <&clk IMX8MN_CLK_DRAM_ALT>,
 				 <&clk IMX8MN_CLK_DRAM_APB>;
+			interconnect-node-id = <IMX8MN_ICS_DRAM>;
 			devfreq-events = <&ddr_pmu>;
 		};
 
