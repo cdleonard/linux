@@ -7,3 +7,7 @@ config INTERCONNECT_IMX
 config INTERCONNECT_IMX8MM
 	def_bool y
 	depends on INTERCONNECT_IMX
+
+config INTERCONNECT_IMX8MQ
+	def_bool y
+	depends on INTERCONNECT_IMX
