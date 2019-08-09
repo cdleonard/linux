@@ -13,6 +13,9 @@
 #include <linux/clk-provider.h>
 #include <linux/arm-smccc.h>
 
+#include <asm/perf_event.h>
+#include <linux/perf_event.h>
+
 #define IMX_SIP_DDR_DVFS			0xc2000004
 
 /* Values starting from 0 switch to specific frequency */
@@ -80,6 +83,17 @@ struct imx8m_ddrc {
 
 	int freq_count;
 	struct imx8m_ddrc_freq freq_table[IMX8M_DDRC_MAX_FREQ_COUNT];
+
+	/* For measuring load with perf events: */
+	struct pmu *pmu;
+
+	struct perf_event_attr rd_event_attr;
+	struct perf_event_attr wr_event_attr;
+	struct perf_event *rd_event;
+	struct perf_event *wr_event;
+
+	u64 last_rd_val, last_rd_ena, last_rd_run;
+	u64 last_wr_val, last_wr_ena, last_wr_run;
 };
 
 static struct imx8m_ddrc_freq *imx8m_ddrc_find_freq(struct imx8m_ddrc *priv,
@@ -291,11 +305,102 @@ static int imx8m_ddrc_get_dev_status(struct device *dev,
 {
 	struct imx8m_ddrc *priv = dev_get_drvdata(dev);
 
-	stat->busy_time = 0;
-	stat->total_time = 0;
 	stat->current_frequency = clk_get_rate(priv->dram_core);
 
+	if (priv->rd_event && priv->wr_event) {
+		u64 rd_delta, rd_val, rd_ena, rd_run;
+		u64 wr_delta, wr_val, wr_ena, wr_run;
+
+		rd_val = perf_event_read_value(priv->rd_event,
+					       &rd_ena, &rd_run);
+		wr_val = perf_event_read_value(priv->wr_event,
+					       &wr_ena, &wr_run);
+
+		rd_delta = (rd_val - priv->last_rd_val) *
+			   (rd_ena - priv->last_rd_ena);
+		do_div(rd_delta, rd_run - priv->last_rd_run);
+		priv->last_rd_val = rd_val;
+		priv->last_rd_ena = rd_ena;
+		priv->last_rd_run = rd_run;
+
+		wr_delta = (wr_val - priv->last_wr_val) *
+			   (wr_ena - priv->last_wr_ena);
+		do_div(wr_delta, wr_run - priv->last_wr_run);
+		priv->last_wr_val = wr_val;
+		priv->last_wr_ena = wr_ena;
+		priv->last_wr_run = wr_run;
+
+		/* magic numbers, possibly wrong */
+		stat->busy_time = 4 * (rd_delta + wr_delta);
+		stat->total_time = stat->current_frequency;
+	} else {
+		stat->busy_time = 0;
+		stat->total_time = 0;
+	}
+
 	return 0;
+}
+
+static int imx8m_ddrc_perf_disable(struct imx8m_ddrc *priv)
+{
+	/* release and set to NULL */
+	if (!IS_ERR_OR_NULL(priv->rd_event))
+		perf_event_release_kernel(priv->rd_event);
+	if (!IS_ERR_OR_NULL(priv->wr_event))
+		perf_event_release_kernel(priv->wr_event);
+	priv->rd_event = NULL;
+	priv->wr_event = NULL;
+
+	return 0;
+}
+
+static int imx8m_ddrc_perf_enable(struct imx8m_ddrc *priv)
+{
+	int ret;
+
+	priv->rd_event_attr.size = sizeof(priv->rd_event_attr);
+	priv->rd_event_attr.type = priv->pmu->type;
+	priv->rd_event_attr.config = 0x2a;
+
+	priv->rd_event = perf_event_create_kernel_counter(
+			&priv->rd_event_attr, 0, NULL, NULL, NULL);
+	if (IS_ERR(priv->rd_event)) {
+		ret = PTR_ERR(priv->rd_event);
+		goto err;
+	}
+
+	priv->wr_event_attr.size = sizeof(priv->wr_event_attr);
+	priv->wr_event_attr.type = priv->pmu->type;
+	priv->wr_event_attr.config = 0x2b;
+
+	priv->wr_event = perf_event_create_kernel_counter(
+			&priv->wr_event_attr, 0, NULL, NULL, NULL);
+	if (IS_ERR(priv->wr_event)) {
+		ret = PTR_ERR(priv->wr_event);
+		goto err;
+	}
+
+	return 0;
+
+err:
+	imx8m_ddrc_perf_disable(priv);
+	return ret;
+}
+
+static int imx8m_ddrc_init_events(struct device *dev,
+				  struct device_node *events_node)
+{
+	struct imx8m_ddrc *priv = dev_get_drvdata(dev);
+
+	priv->pmu = perf_get_pmu_by_node(events_node);
+	if (!priv->pmu) {
+		dev_dbg(dev, "missing pmu for %pOF, defer!\n", events_node);
+		return -EPROBE_DEFER;
+	}
+
+	dev_dbg(dev, "events from pmu %s\n", priv->pmu->name);
+
+	return imx8m_ddrc_perf_enable(priv);
 }
 
 static int imx8m_ddrc_init_freq_info(struct device *dev)
@@ -378,6 +483,13 @@ static int imx8m_ddrc_check_opps(struct device *dev)
 
 static void imx8m_ddrc_exit(struct device *dev)
 {
+	struct imx8m_ddrc *priv = dev_get_drvdata(dev);
+
+	imx8m_ddrc_perf_disable(priv);
+	if (priv->pmu)
+		put_device(priv->pmu->dev);
+	priv->pmu = NULL;
+
 	dev_pm_opp_of_remove_table(dev);
 }
 
@@ -385,6 +497,7 @@ static int imx8m_ddrc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct imx8m_ddrc *priv;
+	struct device_node *events_node;
 	const char *gov = DEVFREQ_GOV_USERSPACE;
 	int ret;
 
@@ -398,6 +511,15 @@ static int imx8m_ddrc_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(dev, "failed to init firmware freq info: %d\n", ret);
 		return ret;
+	}
+
+	events_node = of_parse_phandle(dev->of_node, "devfreq-events", 0);
+	if (events_node && of_device_is_available(events_node)) {
+		ret = imx8m_ddrc_init_events(dev, events_node);
+		of_node_put(events_node);
+		if (ret)
+			goto err;
+		gov = DEVFREQ_GOV_SIMPLE_ONDEMAND;
 	}
 
 	priv->dram_core = devm_clk_get(dev, "core");
@@ -441,6 +563,9 @@ static int imx8m_ddrc_probe(struct platform_device *pdev)
 	return 0;
 
 err:
+	imx8m_ddrc_perf_disable(priv);
+	if (priv->pmu)
+		put_device(priv->pmu->dev);
 	dev_pm_opp_of_remove_table(dev);
 	return ret;
 }
