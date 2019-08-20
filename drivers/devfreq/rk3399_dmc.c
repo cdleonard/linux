@@ -456,8 +456,6 @@ static int rk3399_dmcfreq_probe(struct platform_device *pdev)
 		goto err_free_opp;
 	}
 
-	devm_devfreq_register_opp_notifier(dev, data->devfreq);
-
 	data->dev = dev;
 	platform_set_drvdata(pdev, data);
 
@@ -472,10 +470,6 @@ static int rk3399_dmcfreq_remove(struct platform_device *pdev)
 {
 	struct rk3399_dmcfreq *dmcfreq = dev_get_drvdata(&pdev->dev);
 
-	/*
-	 * Before remove the opp table we need to unregister the opp notifier.
-	 */
-	devm_devfreq_unregister_opp_notifier(dmcfreq->dev, dmcfreq->devfreq);
 	dev_pm_opp_of_remove_table(dmcfreq->dev);
 
 	return 0;

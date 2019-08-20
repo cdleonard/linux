@@ -358,13 +358,6 @@ static int exynos_bus_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	/* Register opp_notifier to catch the change of OPP  */
-	ret = devm_devfreq_register_opp_notifier(dev, bus->devfreq);
-	if (ret < 0) {
-		dev_err(dev, "failed to register opp notifier\n");
-		goto err;
-	}
-
 	/*
 	 * Enable devfreq-event to get raw data which is used to determine
 	 * current bus load.
