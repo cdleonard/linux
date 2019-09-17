@@ -799,14 +799,6 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	devfreq->suspend_freq = dev_pm_opp_get_suspend_opp_freq(dev);
 	atomic_set(&devfreq->suspend_count, 0);
 
-	dev_set_name(&devfreq->dev, "devfreq%d",
-				atomic_inc_return(&devfreq_no));
-	err = device_add(&devfreq->dev);
-	if (err) {
-		mutex_unlock(&devfreq->lock);
-		goto err_dev;
-	}
-
 	devfreq->trans_table = devm_kzalloc(&devfreq->dev,
 			array3_size(sizeof(unsigned int),
 				    devfreq->profile->max_state,
@@ -815,7 +807,7 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	if (!devfreq->trans_table) {
 		mutex_unlock(&devfreq->lock);
 		err = -ENOMEM;
-		goto err_devfreq;
+		goto err_dev;
 	}
 
 	devfreq->time_in_state = devm_kcalloc(&devfreq->dev,
@@ -825,12 +817,20 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	if (!devfreq->time_in_state) {
 		mutex_unlock(&devfreq->lock);
 		err = -ENOMEM;
-		goto err_devfreq;
+		goto err_dev;
 	}
 
 	devfreq->last_stat_updated = jiffies;
 
 	srcu_init_notifier_head(&devfreq->transition_notifier_list);
+
+	dev_set_name(&devfreq->dev, "devfreq%d",
+				atomic_inc_return(&devfreq_no));
+	err = device_add(&devfreq->dev);
+	if (err) {
+		mutex_unlock(&devfreq->lock);
+		goto err_dev;
+	}
 
 	mutex_unlock(&devfreq->lock);
 
@@ -883,7 +883,6 @@ struct devfreq *devfreq_add_device(struct device *dev,
 
 err_init:
 	mutex_unlock(&devfreq_list_lock);
-err_devfreq:
 	devfreq_remove_device(devfreq);
 	return ERR_PTR(err);
 err_dev:
