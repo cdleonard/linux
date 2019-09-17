@@ -593,6 +593,8 @@ static void devfreq_dev_release(struct device *dev)
 	if (devfreq->profile->exit)
 		devfreq->profile->exit(devfreq->dev.parent);
 
+	kfree(devfreq->time_in_state);
+	kfree(devfreq->trans_table);
 	mutex_destroy(&devfreq->lock);
 	kfree(devfreq);
 }
@@ -676,6 +678,30 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	devfreq->suspend_freq = dev_pm_opp_get_suspend_opp_freq(dev);
 	atomic_set(&devfreq->suspend_count, 0);
 
+	devfreq->trans_table = kzalloc(
+			array3_size(sizeof(unsigned int),
+				    devfreq->profile->max_state,
+				    devfreq->profile->max_state),
+			GFP_KERNEL);
+	if (!devfreq->trans_table) {
+		mutex_unlock(&devfreq->lock);
+		err = -ENOMEM;
+		goto err_dev;
+	}
+
+	devfreq->time_in_state = kcalloc(devfreq->profile->max_state,
+					 sizeof(unsigned long),
+					 GFP_KERNEL);
+	if (!devfreq->time_in_state) {
+		mutex_unlock(&devfreq->lock);
+		err = -ENOMEM;
+		goto err_dev;
+	}
+
+	devfreq->last_stat_updated = jiffies;
+
+	srcu_init_notifier_head(&devfreq->transition_notifier_list);
+
 	dev_set_name(&devfreq->dev, "devfreq%d",
 				atomic_inc_return(&devfreq_no));
 	err = device_register(&devfreq->dev);
@@ -684,31 +710,6 @@ struct devfreq *devfreq_add_device(struct device *dev,
 		put_device(&devfreq->dev);
 		goto err_out;
 	}
-
-	devfreq->trans_table = devm_kzalloc(&devfreq->dev,
-			array3_size(sizeof(unsigned int),
-				    devfreq->profile->max_state,
-				    devfreq->profile->max_state),
-			GFP_KERNEL);
-	if (!devfreq->trans_table) {
-		mutex_unlock(&devfreq->lock);
-		err = -ENOMEM;
-		goto err_devfreq;
-	}
-
-	devfreq->time_in_state = devm_kcalloc(&devfreq->dev,
-			devfreq->profile->max_state,
-			sizeof(unsigned long),
-			GFP_KERNEL);
-	if (!devfreq->time_in_state) {
-		mutex_unlock(&devfreq->lock);
-		err = -ENOMEM;
-		goto err_devfreq;
-	}
-
-	devfreq->last_stat_updated = jiffies;
-
-	srcu_init_notifier_head(&devfreq->transition_notifier_list);
 
 	mutex_unlock(&devfreq->lock);
 
@@ -739,10 +740,16 @@ struct devfreq *devfreq_add_device(struct device *dev,
 
 err_init:
 	mutex_unlock(&devfreq_list_lock);
-err_devfreq:
 	devfreq_remove_device(devfreq);
-	devfreq = NULL;
+	return ERR_PTR(err);
+
 err_dev:
+	/*
+	 * Cleanup path for errors that happen before registration.
+	 * Otherwise we rely on devfreq_dev_release.
+	 */
+	kfree(devfreq->time_in_state);
+	kfree(devfreq->trans_table);
 	kfree(devfreq);
 err_out:
 	return ERR_PTR(err);
