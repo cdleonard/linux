@@ -109,8 +109,6 @@ struct devfreq_dev_profile {
 
 /**
  * struct devfreq - Device devfreq structure
- * @node:	list node - contains the devices with devfreq that have been
- *		registered.
  * @lock:	a mutex to protect accessing devfreq.
  * @dev:	device registered by devfreq class. dev.parent is the device
  *		using devfreq.
@@ -149,8 +147,6 @@ struct devfreq_dev_profile {
  * to protect its own private data in void *data as well.
  */
 struct devfreq {
-	struct list_head node;
-
 	struct mutex lock;
 	struct device dev;
 	struct devfreq_dev_profile *profile;
