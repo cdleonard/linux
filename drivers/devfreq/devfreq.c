@@ -871,6 +871,7 @@ err_dev:
 			dev_warn(dev, "Failed to remove DEV_PM_QOS_MIN_FREQUENCY request\n");
 	kfree(devfreq->time_in_state);
 	kfree(devfreq->trans_table);
+	mutex_destroy(&devfreq->lock);
 	kfree(devfreq);
 err_out:
 	return ERR_PTR(err);
