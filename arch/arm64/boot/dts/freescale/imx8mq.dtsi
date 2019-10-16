@@ -776,6 +776,7 @@
 					 <&clk IMX8MQ_CLK_DUMMY>, <&clk IMX8MQ_CLK_DUMMY>;
 				clock-names = "bus", "mclk1", "mclk2", "mclk3";
 				dmas = <&sdma1 10 24 0>, <&sdma1 11 24 0>;
+				interconnects = <&noc IMX8MQ_ICM_SDMA1 &noc IMX8MQ_ICS_DRAM>;
 				dma-names = "rx", "tx";
 				status = "disabled";
 			};
