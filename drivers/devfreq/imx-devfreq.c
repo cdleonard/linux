@@ -17,6 +17,7 @@ struct imx_devfreq {
 	struct devfreq *devfreq;
 	struct clk *clk;
 	struct devfreq_passive_data passive_data;
+	struct platform_device *icc_pdev;
 };
 
 static int imx_devfreq_target(struct device *dev, unsigned long *freq, u32 flags)
@@ -61,7 +62,36 @@ static int imx_devfreq_get_dev_status(struct device *dev,
 
 static void imx_devfreq_exit(struct device *dev)
 {
+	struct imx_devfreq *priv = dev_get_drvdata(dev);
+
 	dev_pm_opp_of_remove_table(dev);
+	platform_device_unregister(priv->icc_pdev);
+}
+
+/* imx_devfreq_init_icc() - register matching icc provider if required */
+static int imx_devfreq_init_icc(struct device *dev)
+{
+	struct imx_devfreq *priv = dev_get_drvdata(dev);
+	const char *icc_driver_name;
+
+	if (!IS_ENABLED(CONFIG_INTERCONNECT_IMX))
+		return 0;
+	if (!of_get_property(dev->of_node, "#interconnect-cells", 0))
+		return 0;
+
+	icc_driver_name = of_device_get_match_data(dev);
+	if (!icc_driver_name)
+		return 0;
+
+	priv->icc_pdev = platform_device_register_data(
+			dev, icc_driver_name, 0, NULL, 0);
+	if (IS_ERR(priv->icc_pdev)) {
+		dev_err(dev, "failed to register icc provider %s: %ld\n",
+				icc_driver_name, PTR_ERR(priv->devfreq));
+		return PTR_ERR(priv->devfreq);
+	}
+
+	return 0;
 }
 
 static int imx_devfreq_probe(struct platform_device *pdev)
@@ -120,6 +150,10 @@ static int imx_devfreq_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+	ret = imx_devfreq_init_icc(dev);
+	if (ret)
+		goto err;
+
 	return 0;
 
 err:
@@ -128,6 +162,9 @@ err:
 }
 
 static const struct of_device_id imx_devfreq_of_match[] = {
+	{ .compatible = "fsl,imx8mq-noc", .data = "imx8mq-interconnect", },
+	{ .compatible = "fsl,imx8mm-noc", .data = "imx8mm-interconnect", },
+	{ .compatible = "fsl,imx8mn-noc", .data = "imx8mn-interconnect", },
 	{ .compatible = "fsl,imx8m-noc", },
 	{ .compatible = "fsl,imx8m-nic", },
 	{ /* sentinel */ },
