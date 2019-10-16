@@ -7,6 +7,7 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/dmaengine.h>
+#include <linux/interconnect.h>
 #include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
@@ -1014,6 +1015,16 @@ static int fsl_sai_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, sai);
 
+	sai->icc_path = of_icc_get(&pdev->dev, NULL);
+	if (PTR_ERR(sai->icc_path) == -EPROBE_DEFER) {
+		return -EPROBE_DEFER;
+	} else if (IS_ERR(sai->icc_path)) {
+		sai->icc_path = NULL;
+	}
+	/* HACK to force DDRC high even on imx8mq: */
+	/* Real value should be computed based on bit rates */
+	sai->icc_path_bw = 678900;
+
 	pm_runtime_enable(&pdev->dev);
 
 	ret = devm_snd_soc_register_component(&pdev->dev, &fsl_component,
@@ -1096,6 +1107,8 @@ static int fsl_sai_runtime_suspend(struct device *dev)
 	regcache_cache_only(sai->regmap, true);
 	regcache_mark_dirty(sai->regmap);
 
+	icc_set_bw(sai->icc_path, 0, 0);
+
 	return 0;
 }
 
@@ -1104,6 +1117,8 @@ static int fsl_sai_runtime_resume(struct device *dev)
 	struct fsl_sai *sai = dev_get_drvdata(dev);
 	unsigned int ofs = sai->soc_data->reg_offset;
 	int ret;
+
+	icc_set_bw(sai->icc_path, sai->icc_path_bw, 0);
 
 	ret = clk_prepare_enable(sai->bus_clk);
 	if (ret) {
