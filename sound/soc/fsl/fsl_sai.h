@@ -182,6 +182,9 @@ struct fsl_sai {
 	const struct fsl_sai_soc_data *soc_data;
 	struct snd_dmaengine_dai_dma_data dma_params_rx;
 	struct snd_dmaengine_dai_dma_data dma_params_tx;
+
+	struct icc_path *icc_path;
+	u32 icc_path_bw;
 };
 
 #define TX 1
