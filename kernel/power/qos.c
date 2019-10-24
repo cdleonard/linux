@@ -710,12 +710,12 @@ s32 freq_qos_read_value(struct freq_constraints *qos,
 }
 
 /**
- * freq_qos_apply - Add/modify/remove frequency QoS request.
+ * _freq_qos_apply - Add/modify/remove frequency QoS request.
  * @req: Constraint request to apply.
  * @action: Action to perform (add/update/remove).
  * @value: Value to assign to the QoS request.
  */
-static int freq_qos_apply(struct freq_qos_request *req,
+int _freq_qos_apply(struct freq_qos_request *req,
 			  enum pm_qos_req_action action, s32 value)
 {
 	int ret;
@@ -735,6 +735,7 @@ static int freq_qos_apply(struct freq_qos_request *req,
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(_freq_qos_apply);
 
 /**
  * freq_qos_add_request - Insert new frequency QoS request into a given list.
@@ -765,7 +766,7 @@ int freq_qos_add_request(struct freq_constraints *qos,
 
 	req->qos = qos;
 	req->type = type;
-	ret = freq_qos_apply(req, PM_QOS_ADD_REQ, value);
+	ret = _freq_qos_apply(req, PM_QOS_ADD_REQ, value);
 	if (ret < 0) {
 		req->qos = NULL;
 		req->type = 0;
@@ -798,7 +799,7 @@ int freq_qos_update_request(struct freq_qos_request *req, s32 new_value)
 	if (req->pnode.prio == new_value)
 		return 0;
 
-	return freq_qos_apply(req, PM_QOS_UPDATE_REQ, new_value);
+	return _freq_qos_apply(req, PM_QOS_UPDATE_REQ, new_value);
 }
 EXPORT_SYMBOL_GPL(freq_qos_update_request);
 
@@ -821,7 +822,7 @@ int freq_qos_remove_request(struct freq_qos_request *req)
 		 "%s() called for unknown object\n", __func__))
 		return -EINVAL;
 
-	return freq_qos_apply(req, PM_QOS_REMOVE_REQ, PM_QOS_DEFAULT_VALUE);
+	return _freq_qos_apply(req, PM_QOS_REMOVE_REQ, PM_QOS_DEFAULT_VALUE);
 }
 EXPORT_SYMBOL_GPL(freq_qos_remove_request);
 
