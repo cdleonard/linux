@@ -311,17 +311,32 @@ are the following:
 	Maximum frequency the CPUs belonging to this policy are allowed to be
 	running at (in kHz).
 
-	This attribute is read-write and writing a string representing an
-	integer to it will cause a new limit to be set (it must not be lower
-	than the value of the ``scaling_min_freq`` attribute).
+	This attribute is read-write: writing an integer will set a new limit
+	(just like ``user_max_freq``) while reading will show the current
+	limit (potentially affected by other system contraints such as thermal
+	throttling).
 
 ``scaling_min_freq``
 	Minimum frequency the CPUs belonging to this policy are allowed to be
 	running at (in kHz).
 
-	This attribute is read-write and writing a string representing a
-	non-negative integer to it will cause a new limit to be set (it must not
-	be higher than the value of the ``scaling_max_freq`` attribute).
+	This attribute is read-write: writing an integer will set a new limit
+	(just like ``user_min_freq``) while reading will show the current
+	limit (potentially affected by other system contraints).
+
+``user_max_freq``
+	Userspace contraint for the maximum frequency the CPUs belonging to
+	this policy are allowed to be running at (in kHz).
+
+	This attribute is read-write: writing an integer will set a new limit
+	and reading will show the last limit set by userspace.
+
+``user_min_freq``
+	Userspace contraint for minimum frequency the CPUs belonging to this
+	policy are allowed to be running at (in kHz).
+
+	This attribute is read-write: writing an integer will set a new limit
+	and reading will show the last limit set by userspace.
 
 ``scaling_setspeed``
 	This attribute is functional only if the `userspace`_ scaling governor

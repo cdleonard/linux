@@ -724,8 +724,23 @@ static ssize_t store_##file_name					\
 	return ret >= 0 ? count : ret;					\
 }
 
+store_one(user_min_freq, min);
+store_one(user_max_freq, max);
 store_one(scaling_min_freq, min);
 store_one(scaling_max_freq, max);
+
+#undef show_one
+
+#define show_one(file_name, object)					\
+static ssize_t show_##file_name						\
+(struct cpufreq_policy *policy, char *buf)				\
+{									\
+	s32 val = freq_qos_get_request_value(policy->object##_freq_req);\
+	return sprintf(buf, "%d\n", val);				\
+}
+
+show_one(user_min_freq, min);
+show_one(user_max_freq, max);
 
 /**
  * show_cpuinfo_cur_freq - current CPU frequency as detected by hardware
@@ -908,6 +923,8 @@ cpufreq_freq_attr_rw(scaling_min_freq);
 cpufreq_freq_attr_rw(scaling_max_freq);
 cpufreq_freq_attr_rw(scaling_governor);
 cpufreq_freq_attr_rw(scaling_setspeed);
+cpufreq_freq_attr_rw(user_min_freq);
+cpufreq_freq_attr_rw(user_max_freq);
 
 static struct attribute *default_attrs[] = {
 	&cpuinfo_min_freq.attr,
@@ -921,6 +938,8 @@ static struct attribute *default_attrs[] = {
 	&scaling_driver.attr,
 	&scaling_available_governors.attr,
 	&scaling_setspeed.attr,
+	&user_min_freq.attr,
+	&user_max_freq.attr,
 	NULL
 };
 

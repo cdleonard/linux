@@ -298,5 +298,9 @@ int freq_qos_add_notifier(struct freq_constraints *qos,
 int freq_qos_remove_notifier(struct freq_constraints *qos,
 			     enum freq_qos_req_type type,
 			     struct notifier_block *notifier);
+static inline s32 freq_qos_get_request_value(struct freq_qos_request *req)
+{
+	return req->pnode.prio;
+}
 
 #endif
