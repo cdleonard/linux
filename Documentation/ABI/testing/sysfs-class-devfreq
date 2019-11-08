@@ -55,6 +55,14 @@ Description:
 		driver should provide the list of available frequencies
 		with its profile.
 
+What:		/sys/class/devfreq/.../usage_stat
+Date:		November 2019
+Contact:	Leonard Crestez <leonard.crestez@nxp.com>
+Description:
+		This file shows the currently usage of the device if
+		measurement is enabled. This is the same information used by
+		ondemand governor to make decisions.
+
 What:		/sys/class/devfreq/.../userspace/set_freq
 Date:		September 2011
 Contact:	MyungJoo Ham <myungjoo.ham@samsung.com>
