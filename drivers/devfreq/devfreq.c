@@ -1595,6 +1595,39 @@ static ssize_t trans_stat_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(trans_stat);
 
+static ssize_t usage_stat_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	struct devfreq *devfreq = to_devfreq(dev);
+	struct devfreq_dev_status *stat = &devfreq->last_status;
+	int ret;
+	ssize_t len = 0;
+
+	if (!devfreq->profile->get_dev_status)
+		return sprintf(buf, "Not Supported.\n");
+
+	if (!devfreq->stop_polling) {
+		mutex_lock(&devfreq->lock);
+		ret = devfreq->profile->get_dev_status(dev->parent, stat);
+		mutex_unlock(&devfreq->lock);
+		if (ret) {
+			len += sprintf(buf + len, "Poll error: %d\n", ret);
+			return len;
+		}
+	} else
+		len += sprintf(buf + len, "Polling stopped\n");
+
+	len += sprintf(buf + len, "Busy: %lu\n", stat->busy_time);
+	len += sprintf(buf + len, "Total: %lu\n", stat->total_time);
+	len += sprintf(buf + len, "Current Frequency: %lu\n",
+		       stat->current_frequency);
+	len += sprintf(buf + len, "Usage: %lu%%\n",
+		       stat->busy_time * 100 / stat->total_time);
+
+	return len;
+}
+static DEVICE_ATTR_RO(usage_stat);
+
 static struct attribute *devfreq_attrs[] = {
 	&dev_attr_governor.attr,
 	&dev_attr_available_governors.attr,
@@ -1605,6 +1638,7 @@ static struct attribute *devfreq_attrs[] = {
 	&dev_attr_min_freq.attr,
 	&dev_attr_max_freq.attr,
 	&dev_attr_trans_stat.attr,
+	&dev_attr_usage_stat.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(devfreq);
