@@ -49,6 +49,10 @@ properties:
   operating-points-v2: true
   opp-table: true
 
+  devfreq-events:
+    description: Phandle of PMU node
+    $ref: "/schemas/types.yaml#/definitions/phandle"
+
 required:
   - reg
   - compatible
