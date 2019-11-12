@@ -10243,6 +10243,7 @@ static int pmu_dev_alloc(struct pmu *pmu)
 
 	dev_set_drvdata(pmu->dev, pmu);
 	pmu->dev->bus = &pmu_bus;
+	pmu->dev->parent = pmu->parent_dev;
 	pmu->dev->release = pmu_dev_release;
 	ret = device_add(pmu->dev);
 	if (ret)
@@ -10271,6 +10272,30 @@ free_dev:
 	put_device(pmu->dev);
 	goto out;
 }
+
+#ifdef CONFIG_OF
+static int perf_match_parent_of_node(struct device *dev, const void *np)
+{
+       return dev->parent && dev->parent->of_node == np;
+}
+
+/**
+ * perf_get_pmu_by_node() - Fetch PMU instance via devicetree node
+ *
+ * @node: devicetree node for PMU
+ *
+ * Caller should put_device(pmu-dev) when done.
+ */
+struct pmu* perf_get_pmu_by_node(struct device_node *node)
+{
+       struct device* dev;
+
+       dev = bus_find_device(&pmu_bus, NULL, node, perf_match_parent_of_node);
+
+       return dev ? dev_get_drvdata(dev) : NULL;
+}
+EXPORT_SYMBOL_GPL(perf_get_pmu_by_node);
+#endif
 
 static struct lock_class_key cpuctx_mutex;
 static struct lock_class_key cpuctx_lock;

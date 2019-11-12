@@ -666,6 +666,7 @@ static int ddr_perf_probe(struct platform_device *pdev)
 		goto ddr_perf_err;
 	}
 
+	pmu->pmu.parent_dev = &pdev->dev;
 	ret = perf_pmu_register(&pmu->pmu, name, -1);
 	if (ret)
 		goto ddr_perf_err;
