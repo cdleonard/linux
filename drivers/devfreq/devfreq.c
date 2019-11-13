@@ -178,7 +178,7 @@ static int set_freq_table(struct devfreq *devfreq)
 		return -EINVAL;
 
 	profile->max_state = count;
-	profile->freq_table = devm_kcalloc(devfreq->dev.parent,
+	profile->freq_table = devm_kcalloc(&devfreq->dev,
 					profile->max_state,
 					sizeof(*profile->freq_table),
 					GFP_KERNEL);
@@ -190,7 +190,6 @@ static int set_freq_table(struct devfreq *devfreq)
 	for (i = 0, freq = 0; i < profile->max_state; i++, freq++) {
 		opp = dev_pm_opp_find_freq_ceil(devfreq->dev.parent, &freq);
 		if (IS_ERR(opp)) {
-			devm_kfree(devfreq->dev.parent, profile->freq_table);
 			profile->max_state = 0;
 			return PTR_ERR(opp);
 		}
