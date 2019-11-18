@@ -40,6 +40,7 @@ available subsections can be seen below.
    ipmb
    i3c/index
    interconnect
+   devfreq
    hsi
    edac
    scsi
