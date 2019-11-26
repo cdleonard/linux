@@ -626,6 +626,20 @@ static ssize_t pm_qos_power_write(struct file *filp, const char __user *buf,
 	return count;
 }
 
+void dev_pm_qos_summary_show_one(struct seq_file* s, struct device *dev);
+
+static int dev_pm_qos_summary_iter(struct device *dev, void *data)
+{
+	dev_pm_qos_summary_show_one(data, dev);
+	return 0;
+}
+
+static int dev_pm_qos_summary_show(struct seq_file *s, void *data)
+{
+	bus_for_each_dev(&platform_bus_type, NULL, s, dev_pm_qos_summary_iter);
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(dev_pm_qos_summary);
 
 static int __init pm_qos_power_init(void)
 {
@@ -645,6 +659,9 @@ static int __init pm_qos_power_init(void)
 			return ret;
 		}
 	}
+
+	debugfs_create_file("dev_pm_qos_summary", S_IRUGO, d, NULL,
+			    &dev_pm_qos_summary_fops);
 
 	return ret;
 }

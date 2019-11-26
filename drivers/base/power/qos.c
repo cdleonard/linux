@@ -980,3 +980,37 @@ void dev_pm_qos_hide_latency_tolerance(struct device *dev)
 	pm_runtime_put(dev);
 }
 EXPORT_SYMBOL_GPL(dev_pm_qos_hide_latency_tolerance);
+
+void dev_pm_qos_summary_show_one(struct seq_file* s, struct device *dev)
+{
+	struct dev_pm_qos_request *req;
+	struct dev_pm_qos *qos = dev->power.qos;
+	s32 val;
+
+	mutex_lock(&dev_pm_qos_mtx);
+	if (!qos)
+		goto out;
+
+	seq_printf(s, "QoS constraints for %s\n", dev_name(dev));
+	val = dev_pm_qos_read_value(dev, DEV_PM_QOS_RESUME_LATENCY);
+	seq_printf(s, "\taggregated resume_latency %d%s\n", val,
+			(val == PM_QOS_RESUME_LATENCY_DEFAULT_VALUE) ? " (default)" : "");
+	plist_for_each_entry(req, &qos->resume_latency.list, data.pnode)
+		seq_printf(s, "\t\trequest resume_latency %d", req->data.pnode.prio);
+
+	val = dev_pm_qos_read_value(dev, DEV_PM_QOS_MIN_FREQUENCY);
+	seq_printf(s, "\taggregated min_freq %d kHz%s\n", val,
+			(val == PM_QOS_MIN_FREQUENCY_DEFAULT_VALUE) ? " (default)" : "");
+	plist_for_each_entry(req, &qos->freq.min_freq.list, data.freq.pnode)
+		seq_printf(s, "\t\trequest min_freq %d kHz\n", req->data.freq.pnode.prio);
+
+	val = dev_pm_qos_read_value(dev, DEV_PM_QOS_MAX_FREQUENCY);
+	seq_printf(s, "\taggregated max_freq %d kHz%s\n", val,
+			(val == PM_QOS_MAX_FREQUENCY_DEFAULT_VALUE) ? " (default)" : "");
+	plist_for_each_entry(req, &qos->freq.max_freq.list, data.freq.pnode)
+		seq_printf(s, "\t\trequest max_freq %d kHz\n", req->data.freq.pnode.prio);
+
+out:
+	mutex_unlock(&dev_pm_qos_mtx);
+}
+EXPORT_SYMBOL(dev_pm_qos_summary_show_one);
