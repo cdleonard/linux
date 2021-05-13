@@ -20,7 +20,7 @@ obj-$(CONFIG_HIO)             += hio/
 ##
 ##
 ifeq ($(ARCH),x86)
-obj-y				+= xr-usb-serial/
+obj-n				+= xr-usb-serial/
 endif
 ##
 ##
