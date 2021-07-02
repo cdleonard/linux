@@ -1,0 +1,103 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+#ifndef _LINUX_TCP_AUTHOPT_H
+#define _LINUX_TCP_AUTHOPT_H
+
+#include <uapi/linux/tcp.h>
+
+/* Representation of a Master Key Tuple as per RFC5925 */
+struct tcp_authopt_key_info {
+	struct hlist_node node;
+	/* Local identifier */
+	u32 local_id;
+	u32 flags;
+	/* Wire identifiers */
+	u8 send_id, recv_id;
+	u8 alg;
+	u8 keylen;
+	u8 key[TCP_AUTHOPT_MAXKEYLEN];
+	u8 maclen;
+	u8 traffic_key_len;
+	struct rcu_head rcu;
+};
+
+/* Per-socket information regarding tcp_authopt */
+struct tcp_authopt_info {
+	struct hlist_head head;
+	u32 local_send_id;
+	u32 src_isn;
+	u32 dst_isn;
+	u8 rnextkeyid;
+	struct rcu_head rcu;
+};
+
+#ifdef CONFIG_TCP_AUTHOPT
+struct tcp_authopt_key_info *tcp_authopt_key_info_lookup(struct sock *sk, int key_id);
+void tcp_authopt_clear(struct sock *sk);
+int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
+int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen);
+int tcp_authopt_hash(
+		char *hash_location,
+		struct tcp_authopt_key_info *key,
+		struct sock *sk, struct sk_buff *skb);
+int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct request_sock *req);
+static inline int tcp_authopt_openreq(
+		struct sock *newsk,
+		const struct sock *oldsk,
+		struct request_sock *req)
+{
+	if (!rcu_dereference(tcp_sk(oldsk)->authopt_info))
+		return 0;
+	else
+		return __tcp_authopt_openreq(newsk, oldsk, req);
+}
+int __tcp_authopt_inbound_check(
+		struct sock *sk,
+		struct sk_buff *skb,
+		struct tcp_authopt_info *info);
+static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb)
+{
+	struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
+
+	if (info)
+		return __tcp_authopt_inbound_check(sk, skb, info);
+	else
+		return 0;
+}
+#else
+static inline struct tcp_authopt_key_info *tcp_authopt_key_info_lookup(
+		struct sock *sk,
+		int key_id)
+{
+	return NULL;
+}
+static inline int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
+{
+	return -ENOPROTOOPT;
+}
+static inline void tcp_authopt_clear(struct sock *sk)
+{
+}
+static inline int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
+{
+	return -ENOPROTOOPT;
+}
+static inline int tcp_authopt_hash(
+		char *hash_location,
+		struct tcp_authopt_key_info *key,
+		struct sock *sk, struct sk_buff *skb)
+{
+	return -EINVAL;
+}
+static inline int tcp_authopt_openreq(struct sock *newsk,
+				      const struct sock *oldsk,
+				      struct request_sock *req)
+{
+	return 0;
+}
+static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb)
+{
+	return 0;
+}
+#endif
+
+#endif /* _LINUX_TCP_AUTHOPT_H */
