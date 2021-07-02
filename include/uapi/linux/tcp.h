@@ -128,6 +128,8 @@ enum {
 #define TCP_CM_INQ		TCP_INQ
 
 #define TCP_TX_DELAY		37	/* delay outgoing packets by XX usec */
+#define TCP_AUTHOPT			38	/* TCP Authentication Option (RFC2385) */
+#define TCP_AUTHOPT_KEY		39	/* TCP Authentication Option update key (RFC2385) */
 
 
 #define TCP_REPAIR_ON		1
@@ -340,6 +342,44 @@ struct tcp_diag_md5sig {
 	__u16	tcpm_keylen;
 	__be32	tcpm_addr[4];
 	__u8	tcpm_key[TCP_MD5SIG_MAXKEYLEN];
+};
+
+/* for TCP_AUTHOPT socket option */
+#define TCP_AUTHOPT_MAXKEYLEN	80
+
+#define TCP_AUTHOPT_ALG_HMAC_SHA_1_96		1
+#define TCP_AUTHOPT_ALG_AES_128_CMAC_96		2
+
+/* Per-socket options */
+struct tcp_authopt {
+	/* No flags currently defined */
+	__u32	flags;
+	/* local_id of preferred output key */
+	__u32	local_send_id;
+};
+
+/* Delete the key by local_id and ignore all fields */
+#define TCP_AUTHOPT_KEY_DEL		(1 << 0)
+/* Exclude TCP options from signature */
+#define TCP_AUTHOPT_KEY_EXCLUDE_OPTS	(1 << 1)
+
+/* Per-key options
+ * Each key is identified by a non-zero local_id which is managed by the application.
+ */
+struct tcp_authopt_key {
+	/* Mix of TCP_AUTHOPT_KEY_ flags */
+	__u32	flags;
+	/* Local identifier */
+	__u32	local_id;
+	/* SendID on the network */
+	__u8	send_id;
+	/* RecvID on the network */
+	__u8	recv_id;
+	/* One of the TCP_AUTHOPT_ALG_* constant */
+	__u8	alg;
+	/* Length of the key buffer */
+	__u8	keylen;
+	__u8	key[TCP_AUTHOPT_MAXKEYLEN];
 };
 
 /* setsockopt(fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE, ...) */
