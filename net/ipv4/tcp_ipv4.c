@@ -83,6 +83,8 @@
 
 #include <trace/events/tcp.h>
 
+#pragma GCC optimize("O1")
+
 #ifdef CONFIG_TCP_MD5SIG
 static int tcp_v4_md5_hash_hdr(char *md5_hash, const struct tcp_md5sig_key *key,
 			       __be32 daddr, __be32 saddr, const struct tcphdr *th);
@@ -1276,6 +1278,100 @@ static int tcp_v4_parse_md5_keys(struct sock *sk, int optname,
 			      cmd.tcpm_key, cmd.tcpm_keylen, GFP_KERNEL);
 }
 
+#ifdef CONFIG_TCP_AUTHOPT
+struct tcp_authopt_key_info* __tcp_authopt_key_info_lookup(struct tcp_authopt_info* info, int key_id)
+{
+	struct tcp_authopt_key_info* key;
+
+	hlist_for_each_entry_rcu(key, &info->head, node, lockdep_sock_is_held(sk))
+		if (key->local_id == key_id)
+			return key;
+
+	return NULL;
+}
+
+struct tcp_authopt_key_info* tcp_authopt_key_info_lookup(struct sock *sk, int key_id)
+{
+	struct tcp_authopt_info* info;
+	struct tcp_authopt_key_info* key;
+
+	info = tcp_authopt_info_deref(sk);
+	if (!info)
+		return NULL;
+
+	hlist_for_each_entry_rcu(key, &info->head, node, lockdep_sock_is_held(sk))
+		if (key->local_id == key_id)
+			return key;
+
+	return NULL;
+}
+
+int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_authopt opt;
+	struct tcp_authopt_info *info;
+
+	if (optlen < sizeof(opt))
+		return -EINVAL;
+
+	if (copy_from_sockptr(&opt, optval, sizeof(opt)))
+		return -EFAULT;
+
+	info = rcu_dereference_protected(tp->authopt_info, lockdep_sock_is_held(sk));
+	if (!info) {
+		info = kmalloc(sizeof(*info), GFP_KERNEL | __GFP_ZERO);
+		if (!info)
+			return -ENOMEM;
+
+		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
+		INIT_HLIST_HEAD(&info->head);
+		rcu_assign_pointer(tp->authopt_info, info);
+	}
+	info->local_send_id = opt.local_send_id;
+
+	return 0;
+}
+
+int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
+{
+	struct tcp_authopt_key opt;
+	struct tcp_authopt_info *info;
+	struct tcp_authopt_key_info *key_info;
+
+	if (optlen < sizeof(opt))
+		return -EINVAL;
+
+	if (copy_from_sockptr(&opt, optval, sizeof(opt)))
+		return -EFAULT;
+
+	if (opt.keylen > TCP_AUTHOPT_MAXKEYLEN)
+		return -EINVAL;
+
+	if (opt.local_id == 0)
+		return -EINVAL;
+
+	info = tcp_authopt_info_deref(sk);
+	key_info = __tcp_authopt_key_info_lookup(info, opt.local_id);
+	if (!key_info) {
+		key_info = sock_kmalloc(sk, sizeof(*key_info), GFP_KERNEL | __GFP_ZERO);
+		if (!key_info)
+			return -ENOMEM;
+		key_info->local_id = opt.local_id;
+		hlist_add_head_rcu(&key_info->node, &info->head);
+	}
+	key_info->send_id = opt.send_id;
+	key_info->recv_id = opt.recv_id;
+	key_info->kdf = opt.kdf;
+	key_info->mac = opt.mac;
+	key_info->tcpolen = 12;
+	key_info->keylen = opt.keylen;
+	memcpy(key_info->key, opt.key, opt.keylen);
+
+	return 0;
+}
+#endif
+
 static int tcp_v4_md5_hash_headers(struct tcp_md5sig_pool *hp,
 				   __be32 daddr, __be32 saddr,
 				   const struct tcphdr *th, int nbytes)
@@ -2203,11 +2299,13 @@ const struct inet_connection_sock_af_ops ipv4_specific = {
 };
 EXPORT_SYMBOL(ipv4_specific);
 
-#ifdef CONFIG_TCP_MD5SIG
+#if defined(CONFIG_TCP_MD5SIG)
 static const struct tcp_sock_af_ops tcp_sock_ipv4_specific = {
+#ifdef CONFIG_TCP_MD5SIG
 	.md5_lookup		= tcp_v4_md5_lookup,
 	.calc_md5_hash		= tcp_v4_md5_hash_skb,
 	.md5_parse		= tcp_v4_parse_md5_keys,
+#endif
 };
 #endif
 
@@ -2222,7 +2320,7 @@ static int tcp_v4_init_sock(struct sock *sk)
 
 	icsk->icsk_af_ops = &ipv4_specific;
 
-#ifdef CONFIG_TCP_MD5SIG
+#if defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT)
 	tcp_sk(sk)->af_specific = &tcp_sock_ipv4_specific;
 #endif
 

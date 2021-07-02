@@ -44,8 +44,11 @@
 #include <linux/gfp.h>
 #include <linux/module.h>
 #include <linux/static_key.h>
+#include <crypto/hash.h>
 
 #include <trace/events/tcp.h>
+
+#pragma GCC optimize("O1")
 
 /* Refresh clocks of a TCP socket,
  * ensuring monotically increasing values.
@@ -413,6 +416,7 @@ static inline bool tcp_urg_mode(const struct tcp_sock *tp)
 #define OPTION_TS		(1 << 1)
 #define OPTION_MD5		(1 << 2)
 #define OPTION_WSCALE		(1 << 3)
+#define OPTION_AUTHOPT		(1 << 4)
 #define OPTION_FAST_OPEN_COOKIE	(1 << 8)
 #define OPTION_SMC		(1 << 9)
 #define OPTION_MPTCP		(1 << 10)
@@ -443,6 +447,7 @@ struct tcp_out_options {
 	__u32 tsval, tsecr;	/* need to include OPTION_TS */
 	struct tcp_fastopen_cookie *fastopen_cookie;	/* Fast open cookie */
 	struct mptcp_out_options mptcp;
+	struct tcp_authopt_key_info *authopt_key;
 };
 
 static void mptcp_options_write(__be32 *ptr, const struct tcp_sock *tp,
@@ -619,6 +624,16 @@ static void tcp_options_write(__be32 *ptr, struct tcp_sock *tp,
 		ptr += 4;
 	}
 
+	if (unlikely(OPTION_AUTHOPT & options)) {
+		struct tcp_authopt_info *info = tcp_authopt_info_deref((struct sock *)tp);
+		struct tcp_authopt_key_info *key = opts->authopt_key;
+		*ptr++ = htonl((TCPOPT_AUTHOPT << 24) | ((key->tcpolen + 4) << 16) |
+			       (key->send_id << 8) | info->rnextkeyid);
+		/* overload cookie hash location */
+		opts->hash_location = (__u8 *)ptr;
+		ptr += 4;
+	}
+
 	if (unlikely(opts->mss)) {
 		*ptr++ = htonl((TCPOPT_MSS << 24) |
 			       (TCPOLEN_MSS << 16) |
@@ -754,6 +769,138 @@ static void mptcp_set_option_cond(const struct request_sock *req,
 	}
 }
 
+static struct tcp_authopt_key_info *tcp_authopt_lookup(struct sock *sk)
+{
+	struct tcp_authopt_info *info;
+
+	info = tcp_authopt_info_deref(sk);
+	if (!info)
+		return NULL;
+
+	if (!info->local_send_id)
+		return NULL;
+
+	return tcp_authopt_key_info_lookup(sk, info->local_send_id);
+}
+
+struct tcp_v4_authopt_context {
+	__be32 saddr;
+	__be32 daddr;
+	__be16 sport;
+	__be16 dport;
+	__be32 sisn;
+	__be32 disn;
+};
+
+static int tcp_calc_v4_authopt_traffic_key(
+	struct crypto_shash *tfm,
+	u8* key,
+	unsigned int keylen,
+	__be32 saddr,
+	__be32 daddr,
+	__be16 sport,
+	__be16 dport,
+	__be32 sisn,
+	__be32 disn,
+	u8 *traffic_key)
+{
+	SHASH_DESC_ON_STACK(desc, tfm);
+	int err;
+
+	desc->tfm = tfm;
+	QP_TRACE();
+	printk("key: %*ph\n", keylen, key);
+	err = crypto_shash_setkey(tfm, key, keylen);
+	if (err)
+		return err;
+	QP_TRACE();
+	err = crypto_shash_init(desc);
+	if (err)
+		return err;
+	QP_TRACE();
+	struct tcp_v4_authopt_context ctx = {
+		.saddr = saddr,
+		.daddr = daddr,
+		.sport = sport,
+		.dport = dport,
+		.sisn = sisn,
+		.disn = disn,
+	};
+	printk("context: %08x %08x %04x %04x %08x %08x\n", saddr, daddr, sport, dport, sisn, disn);
+	printk("context: %*ph\n", sizeof(ctx), &ctx);
+	// RFC5926 section 3.1.1.1
+	crypto_shash_update(desc, "\x01TCP-AO", 7);
+	crypto_shash_update(desc, (u8*)&saddr, 4);
+	crypto_shash_update(desc, (u8*)&daddr, 4);
+	crypto_shash_update(desc, (u8*)&sport, 2);
+	crypto_shash_update(desc, (u8*)&dport, 2);
+	crypto_shash_update(desc, (u8*)&sisn, 4);
+	crypto_shash_update(desc, (u8*)&disn, 4);
+	crypto_shash_update(desc, "\x00\xa0", 2);
+	QP_TRACE();
+	err = crypto_shash_final(desc, traffic_key);
+	QP_TRACE();
+	return err;
+}
+
+static int tcp_calc_authopt_hash(
+		char *hash_location,
+		struct tcp_authopt_key_info *key,
+		struct sock *sk, struct sk_buff *skb)
+{
+	struct crypto_shash *tfm;
+	struct inet_sock *inet = inet_sk(sk);
+	u8 traffic_key[20];
+	int err;
+
+	/* inline everything: */
+	tfm = crypto_alloc_shash("hmac(sha1)", 0, 0);
+	if (IS_ERR(tfm)) {
+		QP_TRACE();
+		QP_PRINT_LOC("err=%d\n", (int)PTR_ERR(tfm));
+		return PTR_ERR(tfm);
+	}
+	QP_PRINT_LOC("digestsize: %d", crypto_shash_digestsize(tfm));
+	BUG_ON(crypto_shash_digestsize(tfm) != sizeof(traffic_key));
+
+	err = tcp_calc_v4_authopt_traffic_key(tfm,
+			key->key, key->keylen,
+			inet->inet_saddr,
+			inet->inet_daddr,
+			inet->inet_sport,
+			inet->inet_dport,
+			htonl(TCP_SKB_CB(skb)->seq),
+			0,
+			traffic_key);
+	if (err) {
+		QP_PRINT_LOC("err=%d\n", err);
+		goto out_free_shash;
+	}
+	printk("traffic_key: %*ph\n", 20, traffic_key);
+
+	return 0;
+
+out_free_shash:
+	crypto_free_shash(tfm);
+	return err;
+}
+
+static void tcp_authopt_syn_options(struct sock *sk,
+				struct tcp_out_options *opts,
+				unsigned int *remaining)
+{
+#ifdef CONFIG_TCP_AUTHOPT
+	struct tcp_authopt_key_info *key;
+
+	key = tcp_authopt_lookup(sk);
+	if (key) {
+		opts->options |= OPTION_AUTHOPT;
+		opts->authopt_key = key;
+		*remaining -= key->tcpolen;
+	}
+#endif
+}
+
 /* Compute TCP options for SYN packets. This is not the final
  * network wire format yet.
  */
@@ -776,6 +923,7 @@ static unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 		}
 	}
 #endif
+	tcp_authopt_syn_options(sk, opts, &remaining);
 
 	/* We always get an MSS option.  The option bytes which will be seen in
 	 * normal data packets should timestamps be used, must be in the MSS
@@ -1365,6 +1513,12 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
 		tp->af_specific->calc_md5_hash(opts.hash_location,
 					       md5, sk, skb);
+	}
+#endif
+#ifdef CONFIG_TCP_AUTHOPT
+	if (opts.authopt_key) {
+		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
+		tcp_calc_authopt_hash(opts.hash_location, opts.authopt_key, sk, skb);
 	}
 #endif
 

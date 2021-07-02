@@ -184,6 +184,7 @@ void tcp_time_wait(struct sock *sk, int state, int timeo);
 #define TCPOPT_SACK             5       /* SACK Block */
 #define TCPOPT_TIMESTAMP	8	/* Better RTT estimations/PAWS */
 #define TCPOPT_MD5SIG		19	/* MD5 Signature (RFC2385) */
+#define TCPOPT_AUTHOPT		29	/* Auth Option (RFC5925) */
 #define TCPOPT_MPTCP		30	/* Multipath TCP (RFC6824) */
 #define TCPOPT_FASTOPEN		34	/* Fast open (RFC7413) */
 #define TCPOPT_EXP		254	/* Experimental */
@@ -1662,6 +1663,43 @@ int tcp_md5_hash_skb_data(struct tcp_md5sig_pool *, const struct sk_buff *,
 			  unsigned int header_len);
 int tcp_md5_hash_key(struct tcp_md5sig_pool *hp,
 		     const struct tcp_md5sig_key *key);
+
+/* Representation of a Master Key Tuple as per RFC5925 */
+struct tcp_authopt_key_info {
+	struct hlist_node node;
+	/* Local identifier */
+	u32 local_id;
+	u8 send_id, recv_id;
+	u8 kdf, mac;
+	u8 keylen;
+	u8 key[TCP_AUTHOPT_MAXKEYLEN];
+	/* length of the options depends on mac alg */
+	u8 tcpolen;
+};
+
+/* Per-socket information regarding tcp_authopt */
+struct tcp_authopt_info {
+	struct hlist_head head;
+	u32 local_send_id;
+	u32 src_isn;
+	u32 dst_isn;
+	u8 rnextkeyid;
+};
+
+int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
+int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen);
+struct tcp_authopt_key_info* tcp_authopt_key_info_lookup(struct sock *sk, int key_id);
+#ifdef CONFIG_TCP_AUTHOPT
+static inline struct tcp_authopt_info* tcp_authopt_info_deref(struct sock *sk)
+{
+	return rcu_dereference(tcp_sk(sk)->authopt_info);
+}
+#else
+static inline struct tcp_authopt_info* tcp_authopt_info_deref(struct sock *sk)
+{
+	return NULL;
+}
+#endif
 
 /* From tcp_fastopen.c */
 void tcp_fastopen_cache_get(struct sock *sk, u16 *mss,
