@@ -39,6 +39,7 @@
 
 #include <net/tcp.h>
 #include <net/mptcp.h>
+#include <net/tcp_authopt.h>
 
 #include <linux/compiler.h>
 #include <linux/gfp.h>
@@ -413,6 +414,7 @@ static inline bool tcp_urg_mode(const struct tcp_sock *tp)
 #define OPTION_TS		(1 << 1)
 #define OPTION_MD5		(1 << 2)
 #define OPTION_WSCALE		(1 << 3)
+#define OPTION_AUTHOPT		(1 << 4)
 #define OPTION_FAST_OPEN_COOKIE	(1 << 8)
 #define OPTION_SMC		(1 << 9)
 #define OPTION_MPTCP		(1 << 10)
@@ -443,6 +445,7 @@ struct tcp_out_options {
 	__u32 tsval, tsecr;	/* need to include OPTION_TS */
 	struct tcp_fastopen_cookie *fastopen_cookie;	/* Fast open cookie */
 	struct mptcp_out_options mptcp;
+	struct tcp_authopt_key_info *authopt_key;
 };
 
 static void mptcp_options_write(__be32 *ptr, const struct tcp_sock *tp,
@@ -619,6 +622,17 @@ static void tcp_options_write(__be32 *ptr, struct tcp_sock *tp,
 		ptr += 4;
 	}
 
+	if (unlikely(OPTION_AUTHOPT & options)) {
+		struct tcp_authopt_info *info = tcp_authopt_info_deref((struct sock *)tp);
+		struct tcp_authopt_key_info *key = opts->authopt_key;
+		*ptr++ = htonl((TCPOPT_AUTHOPT << 24) | ((4 + key->maclen) << 16) |
+			       (key->send_id << 8) | info->rnextkeyid);
+		/* overload cookie hash location */
+		opts->hash_location = (__u8 *)ptr;
+		/* maclen is currently always 12 but try to align nicely anyway. */
+		ptr += (key->maclen + 3) / 4;
+	}
+
 	if (unlikely(opts->mss)) {
 		*ptr++ = htonl((TCPOPT_MSS << 24) |
 			       (TCPOLEN_MSS << 16) |
@@ -754,6 +768,36 @@ static void mptcp_set_option_cond(const struct request_sock *req,
 	}
 }
 
+static struct tcp_authopt_key_info *tcp_authopt_lookup(struct sock *sk)
+{
+	struct tcp_authopt_info *info;
+
+	info = tcp_authopt_info_deref(sk);
+	if (!info)
+		return NULL;
+
+	if (!info->local_send_id)
+		return NULL;
+
+	return tcp_authopt_key_info_lookup(sk, info->local_send_id);
+}
+
+static void tcp_authopt_syn_options(struct sock *sk,
+				struct tcp_out_options *opts,
+				unsigned int *remaining)
+{
+#ifdef CONFIG_TCP_AUTHOPT
+	struct tcp_authopt_key_info *key;
+
+	key = tcp_authopt_lookup(sk);
+	if (key) {
+		opts->options |= OPTION_AUTHOPT;
+		opts->authopt_key = key;
+		*remaining -= 4 + key->maclen;
+	}
+#endif
+}
+
 /* Compute TCP options for SYN packets. This is not the final
  * network wire format yet.
  */
@@ -776,6 +820,7 @@ static unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 		}
 	}
 #endif
+	tcp_authopt_syn_options(sk, opts, &remaining);
 
 	/* We always get an MSS option.  The option bytes which will be seen in
 	 * normal data packets should timestamps be used, must be in the MSS
@@ -1365,6 +1410,14 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
 		tp->af_specific->calc_md5_hash(opts.hash_location,
 					       md5, sk, skb);
+	}
+#endif
+#ifdef CONFIG_TCP_AUTHOPT
+	if (opts.authopt_key) {
+		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
+		err = tcp_authopt_hash(opts.hash_location, opts.authopt_key, sk, skb);
+		if (err)
+			return err;
 	}
 #endif
 
