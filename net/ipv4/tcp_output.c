@@ -782,9 +782,8 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup(struct sock *sk)
 	return tcp_authopt_key_info_lookup(sk, info->local_send_id);
 }
 
-static void tcp_authopt_syn_options(struct sock *sk,
-				struct tcp_out_options *opts,
-				unsigned int *remaining)
+static int tcp_authopt_init_options(struct sock *sk,
+				struct tcp_out_options *opts)
 {
 #ifdef CONFIG_TCP_AUTHOPT
 	struct tcp_authopt_key_info *key;
@@ -793,9 +792,11 @@ static void tcp_authopt_syn_options(struct sock *sk,
 	if (key) {
 		opts->options |= OPTION_AUTHOPT;
 		opts->authopt_key = key;
-		*remaining -= 4 + key->maclen;
+		return 4 + key->maclen;
 	}
 #endif
+
+	return 0;
 }
 
 /* Compute TCP options for SYN packets. This is not the final
@@ -820,7 +821,7 @@ static unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 		}
 	}
 #endif
-	tcp_authopt_syn_options(sk, opts, &remaining);
+	remaining -= tcp_authopt_init_options(sk, opts);
 
 	/* We always get an MSS option.  The option bytes which will be seen in
 	 * normal data packets should timestamps be used, must be in the MSS
@@ -977,6 +978,7 @@ static unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb
 		}
 	}
 #endif
+	size += tcp_authopt_init_options(sk, opts);
 
 	if (likely(tp->rx_opt.tstamp_ok)) {
 		opts->options |= OPTION_TS;
