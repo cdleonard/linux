@@ -35,7 +35,7 @@ struct tcp_authopt_info {
 };
 
 #ifdef CONFIG_TCP_AUTHOPT
-static inline struct tcp_authopt_info* tcp_authopt_info_deref(struct sock *sk)
+static inline struct tcp_authopt_info* tcp_authopt_info_deref(const struct sock *sk)
 {
 	return rcu_dereference(tcp_sk(sk)->authopt_info);
 }

@@ -5,6 +5,7 @@
 #include <net/tcp_authopt.h>
 #include <crypto/hash.h>
 #include <trace/events/tcp.h>
+#include <qp/qp.h>
 
 struct tcp_authopt_key_info* __tcp_authopt_key_info_lookup(struct sock *sk, struct tcp_authopt_info* info, int key_id)
 {
@@ -149,16 +150,20 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	return 0;
 }
 
+struct tcp_authopt_context_v4 {
+	__be32 saddr;
+	__be32 daddr;
+	__be16 sport;
+	__be16 dport;
+	__be32 sisn;
+	__be32 disn;
+};
+
 static int tcp_authopt_traffic_key_v4(
 		struct crypto_shash *tfm,
 		u8* key,
 		unsigned int keylen,
-		__be32 saddr,
-		__be32 daddr,
-		__be16 sport,
-		__be16 dport,
-		__be32 sisn,
-		__be32 disn,
+		struct tcp_authopt_context_v4 *context,
 		u8 *traffic_key)
 {
 	SHASH_DESC_ON_STACK(desc, tfm);
@@ -173,28 +178,29 @@ static int tcp_authopt_traffic_key_v4(
 	if (err)
 		return err;
 	// RFC5926 section 3.1.1.1
-	crypto_shash_update(desc, "\x01TCP-AO", 7);
-	// RFC5925 section 5.2
-	crypto_shash_update(desc, (u8*)&saddr, 4);
-	crypto_shash_update(desc, (u8*)&daddr, 4);
-	crypto_shash_update(desc, (u8*)&sport, 2);
-	crypto_shash_update(desc, (u8*)&dport, 2);
-	crypto_shash_update(desc, (u8*)&sisn, 4);
-	crypto_shash_update(desc, (u8*)&disn, 4);
-	crypto_shash_update(desc, "\x00\xa0", 2);
-	err = crypto_shash_final(desc, traffic_key);
-	return err;
+	err = crypto_shash_update(desc, "\x01TCP-AO", 7);
+	if (err)
+		return err;
+	err = crypto_shash_update(desc, (u8*)context, sizeof(*context));
+	if (err)
+		return err;
+	err = crypto_shash_update(desc, "\x00\xa0", 2);
+	if (err)
+		return err;
+
+	return crypto_shash_final(desc, traffic_key);
 }
 
 static int tcp_authopt_get_traffic_key(
 		struct sock *sk,
+		struct sk_buff *skb,
 		struct tcp_authopt_key_info *key,
-		__be32 sisn,
-		__be32 disn,
 		u8* traffic_key)
 {
 	struct crypto_shash *kdf_tfm;
-	struct inet_sock *inet = inet_sk(sk);
+	struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);
+	struct tcphdr *th = tcp_hdr(skb);
+	struct tcp_authopt_context_v4 context;
 	int err;
 
 	if (key->kdf == TCP_AUTHOPT_KDF_HMAC_SHA1)
@@ -205,16 +211,41 @@ static int tcp_authopt_get_traffic_key(
 		return PTR_ERR(kdf_tfm);
 	BUG_ON(crypto_shash_digestsize(kdf_tfm) != key->traffic_key_len);
 
-	/* This assumes a SYN packet */
-	err = tcp_authopt_traffic_key_v4(kdf_tfm,
-			key->key, key->keylen,
-			inet->inet_saddr,
-			inet->inet_daddr,
-			inet->inet_sport,
-			inet->inet_dport,
-			sisn,
-			disn,
-			traffic_key);
+	QP_PRINT_LOC("sk=%p flags=%x%s%s\n", sk,
+		tcb->tcp_flags,
+		tcb->tcp_flags & TCPHDR_SYN ? " SYN" : "",
+		tcb->tcp_flags & TCPHDR_ACK ? " ACK" : "");
+	if (th->syn && !th->ack) {
+		context.saddr = inet_sk(sk)->inet_saddr;
+		context.daddr = inet_sk(sk)->inet_daddr;
+		context.sport = inet_sk(sk)->inet_sport;
+		context.dport = inet_sk(sk)->inet_dport;
+		context.sisn = th->seq;
+		context.disn = 0;
+	} else if (th->syn && th->ack) {
+		/* There is no inet_sk for synack */
+		context.saddr = sk->sk_rcv_saddr;
+		context.daddr = sk->sk_daddr;
+		context.sport = th->source;
+		context.dport = th->dest;
+		context.sisn = th->seq;
+		context.disn = htonl(ntohl(th->ack_seq) - 1);
+	} else {
+		struct tcp_authopt_info *authopt_info = tcp_authopt_info_deref(sk);
+		context.saddr = inet_sk(sk)->inet_saddr;
+		context.daddr = inet_sk(sk)->inet_daddr;
+		context.sport = inet_sk(sk)->inet_sport;
+		context.dport = inet_sk(sk)->inet_dport;
+		context.sisn = authopt_info->src_isn;
+		context.disn = authopt_info->dst_isn;
+	}
+
+	printk("context: %*ph\n", (int)sizeof(context), (u8*)&context);
+	printk("context: saddr=%pI4 daddr=%pI4 sport=%hu dport=%hu sisn=%d disn=%d\n",
+			&context.saddr, &context.daddr,
+			ntohs(context.sport), ntohs(context.dport),
+			ntohl(context.sisn), ntohl(context.disn));
+	err = tcp_authopt_traffic_key_v4(kdf_tfm, key->key, key->keylen, &context, traffic_key);
 	printk("traffic_key: %*ph\n", 20, traffic_key);
 
 	crypto_free_shash(kdf_tfm);
@@ -326,6 +357,38 @@ static int tcp_authopt_hash_opts(
 	return 0;
 }
 
+static int skb_shash_frags(
+		struct shash_desc *desc,
+		struct sk_buff* skb)
+{
+	struct sk_buff *frag_iter;
+	int err, i;
+
+	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
+		skb_frag_t *f = &skb_shinfo(skb)->frags[i];
+		u32 p_off, p_len, copied;
+		struct page *p;
+		u8 *vaddr;
+
+		skb_frag_foreach_page(f, skb_frag_off(f), skb_frag_size(f),
+						p, p_off, p_len, copied) {
+			vaddr = kmap_atomic(p);
+			err = crypto_shash_update(desc, vaddr + p_off, p_len);
+			kunmap_atomic(vaddr);
+			if (err)
+				return err;
+		}
+	}
+
+	skb_walk_frags(skb, frag_iter) {
+		err = skb_shash_frags(desc, frag_iter);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
 static int tcp_authopt_hash_v4(
 		struct crypto_shash *tfm,
 		struct sk_buff *skb,
@@ -343,10 +406,11 @@ static int tcp_authopt_hash_v4(
 	if (err)
 		return err;
 
+	QP_PRINT_LOC("saddr=%pI4 daddr=%pI4\n", &saddr, &daddr);
 	err = tcp_authopt_hash_hdr_v4(desc, 0, saddr, daddr, th, skb->len);
 	if (err)
 		return err;
-	err = tcp_authopt_hash_opts(desc, th, true);
+	err = tcp_authopt_hash_opts(desc, th, include_options);
 	if (err)
 		return err;
 
@@ -356,10 +420,9 @@ static int tcp_authopt_hash_v4(
 		if (err)
 			return err;
 	}
-	if (skb_shinfo(skb)->nr_frags) {
-		pr_warn("tcp authopt does not handle fragmented skbs\n");
-		return -EINVAL;
-	}
+	err = skb_shash_frags(desc, skb);
+	if (err)
+		return err;
 
 	return crypto_shash_final(desc, output_mac);
 }
@@ -370,11 +433,7 @@ int tcp_authopt_hash(
 		struct sock *sk,
 		struct sk_buff *skb)
 {
-	struct tcp_authopt_info *authopt_info;
 	struct crypto_shash *tfm;
-	struct inet_sock *inet = inet_sk(sk);
-	struct tcphdr *th = tcp_hdr(skb);
-	struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);
 	u8 traffic_key[TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN];
 	/* MAC inside option is truncated to 12 bytes but crypto API needs output
 	 * buffer to be large enough so we use a buffer on the stack.
@@ -382,21 +441,10 @@ int tcp_authopt_hash(
 	u8 macbuf[16];
 	int err;
 
-	authopt_info = tcp_authopt_info_deref(sk);
+	if (sk->sk_family != AF_INET)
+		return -ENOSYS;
 	BUG_ON(key->traffic_key_len > sizeof(traffic_key));
-	if (tcb->tcp_flags & TCPHDR_SYN)
-		err = tcp_authopt_get_traffic_key(
-				sk,
-				key,
-				htonl(tcb->seq),
-				0, /* SYN */
-				traffic_key);
-	else
-		err = tcp_authopt_get_traffic_key(
-				sk, key,
-				authopt_info->src_isn,
-				authopt_info->dst_isn,
-				traffic_key);
+	err = tcp_authopt_get_traffic_key(sk, skb, key, traffic_key);
 	if (err)
 		return err;
 
@@ -416,9 +464,9 @@ int tcp_authopt_hash(
 
 	err = tcp_authopt_hash_v4(tfm,
 			skb,
-			inet->inet_saddr,
-			inet->inet_daddr,
-			th,
+			sk->sk_rcv_saddr,
+			sk->sk_daddr,
+			tcp_hdr(skb),
 			!(key->flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS),
 			macbuf);
 	if (err)
