@@ -47,6 +47,13 @@ int tcp_authopt_hash(
 		char *hash_location,
 		struct tcp_authopt_key_info *key,
 		struct sock *sk, struct sk_buff *skb);
+int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct request_sock *req);
+static inline int tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct request_sock *req) {
+	if (!rcu_dereference(tcp_sk(oldsk)->authopt_info))
+		return 0;
+	else
+		return __tcp_authopt_openreq(newsk, oldsk, req);
+}
 #else
 static inline struct tcp_authopt_info* tcp_authopt_info_deref(struct sock *sk) {
 	return NULL;
@@ -67,6 +74,9 @@ static inline int tcp_authopt_hash(
 		struct tcp_authopt_key_info *key,
 		struct sock *sk, struct sk_buff *skb) {
 	return -ENOSYS;
+}
+static inline int tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct request_sock *req) {
+	return 0;
 }
 #endif
 

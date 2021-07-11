@@ -782,13 +782,9 @@ static int tcp_authopt_init_options(const struct sock *sk,
 #ifdef CONFIG_TCP_AUTHOPT
 	struct tcp_authopt_info *info;
 	struct tcp_authopt_key_info *key;
-	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
+	info = rcu_dereference_check(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
 		return 0;
-
-	QP_PRINT_LOC("sk=%p info=%p%s%s\n", sk, info,
-			lockdep_sock_is_held(sk) ? " lockdep_sock_is_held" : "",
-			rcu_read_lock_held() ? " rcu_read_lock_held" : "");
 
 	if (!info->local_send_id)
 		return 0;

@@ -150,6 +150,36 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	return 0;
 }
 
+int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct request_sock *req)
+{
+	struct tcp_authopt_info *old_info;
+	struct tcp_authopt_info *new_info;
+
+	old_info = rcu_dereference(tcp_sk(oldsk)->authopt_info);
+	if (!old_info)
+		return 0;
+
+	if ((new_info = rcu_dereference(tcp_sk(newsk)->authopt_info))) {
+		QP_PRINT_LOC("unexpected newsk=%p has authopt_info=%p oldsk=%p old_authopt_info=%p\n",
+				newsk, new_info,
+				oldsk, old_info);
+	}
+	new_info = kmalloc(sizeof(*new_info), GFP_KERNEL | __GFP_ZERO);
+	if (!new_info)
+		return -ENOMEM;
+
+	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
+	INIT_HLIST_HEAD(&new_info->head);
+	new_info->src_isn = tcp_rsk(req)->snt_isn;
+	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
+	QP_PRINT_LOC("oldsk=%p newsk=%p src_isn=%u dst_isn=%u\n",
+			oldsk, newsk,
+			new_info->src_isn, new_info->dst_isn);
+	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, new_info);
+
+	return 0;
+}
+
 struct tcp_authopt_context_v4 {
 	__be32 saddr;
 	__be32 daddr;
@@ -211,9 +241,13 @@ static int tcp_authopt_get_traffic_key(
 		return PTR_ERR(kdf_tfm);
 	BUG_ON(crypto_shash_digestsize(kdf_tfm) != key->traffic_key_len);
 
-	QP_PRINT_LOC("sk=%p flags=%x%s%s\n", sk,
+	QP_PRINT_LOC("sk=%p num=%hu dport=%hu flags=%x%s%s%s\n",
+		sk,
+		ntohs(sk->sk_num),
+		ntohs(sk->sk_dport),
 		tcb->tcp_flags,
 		tcb->tcp_flags & TCPHDR_SYN ? " SYN" : "",
+		tcb->tcp_flags & TCPHDR_FIN ? " FIN" : "",
 		tcb->tcp_flags & TCPHDR_ACK ? " ACK" : "");
 	if (th->syn && !th->ack) {
 		context.saddr = inet_sk(sk)->inet_saddr;
@@ -236,17 +270,23 @@ static int tcp_authopt_get_traffic_key(
 		context.daddr = inet_sk(sk)->inet_daddr;
 		context.sport = inet_sk(sk)->inet_sport;
 		context.dport = inet_sk(sk)->inet_dport;
-		context.sisn = authopt_info->src_isn;
-		context.disn = authopt_info->dst_isn;
+		context.sisn = htonl(authopt_info->src_isn);
+		context.disn = htonl(authopt_info->dst_isn);
 	}
 
-	printk("context: %*ph\n", (int)sizeof(context), (u8*)&context);
-	printk("context: saddr=%pI4 daddr=%pI4 sport=%hu dport=%hu sisn=%d disn=%d\n",
+	printk("context: saddr=%pI4 daddr=%pI4 sport=%hu dport=%hu sisn=%d disn=%u sk=%p %s%s%s\n",
 			&context.saddr, &context.daddr,
 			ntohs(context.sport), ntohs(context.dport),
-			ntohl(context.sisn), ntohl(context.disn));
+			ntohl(context.sisn), ntohl(context.disn),
+			sk,
+			th->syn ? " SYN" : "",
+			th->fin ? " FIN" : "",
+			th->ack ? " ACK" : "");
+	//if (context.sisn == 0 || context.disn == 0 && !th->syn)
+	//	dump_stack();
+	printk("context: %*ph\n", (int)sizeof(context), (u8*)&context);
 	err = tcp_authopt_traffic_key_v4(kdf_tfm, key->key, key->keylen, &context, traffic_key);
-	printk("traffic_key: %*ph\n", 20, traffic_key);
+	printk("traffic_key: %*phN\n", 20, traffic_key);
 
 	crypto_free_shash(kdf_tfm);
 	return err;
@@ -406,7 +446,6 @@ static int tcp_authopt_hash_v4(
 	if (err)
 		return err;
 
-	QP_PRINT_LOC("saddr=%pI4 daddr=%pI4\n", &saddr, &daddr);
 	err = tcp_authopt_hash_hdr_v4(desc, 0, saddr, daddr, th, skb->len);
 	if (err)
 		return err;
@@ -472,7 +511,7 @@ int tcp_authopt_hash(
 	if (err)
 		goto out_free_tfm;
 	memcpy(hash_location, macbuf, key->maclen);
-	printk("mac: %*ph\n", key->maclen, hash_location);
+	printk("mac: %*phN\n", key->maclen, hash_location);
 
 	return 0;
 

@@ -72,6 +72,7 @@
 #include <linux/prefetch.h>
 #include <net/dst.h>
 #include <net/tcp.h>
+#include <net/tcp_authopt.h>
 #include <net/inet_common.h>
 #include <linux/ipsec.h>
 #include <asm/unaligned.h>
@@ -80,6 +81,7 @@
 #include <linux/jump_label_ratelimit.h>
 #include <net/busy_poll.h>
 #include <net/mptcp.h>
+#include <qp/qp.h>
 
 int sysctl_tcp_max_orphans __read_mostly = NR_FILE;
 
@@ -5929,6 +5931,24 @@ void tcp_init_transfer(struct sock *sk, int bpf_op, struct sk_buff *skb)
 	tcp_init_buffer_space(sk);
 }
 
+
+static void tcp_authopt_finish_connect(struct sock *sk, struct sk_buff *skb)
+{
+#ifdef CONFIG_TCP_AUTHOPT
+	struct tcp_authopt_info *info;
+
+	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
+	if (!info)
+		return;
+
+	QP_PRINT_LOC("sk=%p skb=%p\n", sk, skb);
+	QP_DUMP_TCP_HDR(tcp_hdr(skb));
+	info->src_isn = ntohl(tcp_hdr(skb)->ack_seq) - 1;
+	info->dst_isn = ntohl(tcp_hdr(skb)->seq);
+	QP_PRINT_LOC("sk=%p src_isn=%u dst_isn=%u\n", sk, info->src_isn, info->dst_isn);
+#endif
+}
+
 void tcp_finish_connect(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -5936,6 +5956,8 @@ void tcp_finish_connect(struct sock *sk, struct sk_buff *skb)
 
 	tcp_set_state(sk, TCP_ESTABLISHED);
 	icsk->icsk_ack.lrcvtime = tcp_jiffies32;
+
+	tcp_authopt_finish_connect(sk, skb);
 
 	if (skb) {
 		icsk->icsk_af_ops->sk_rx_dst_set(sk, skb);
