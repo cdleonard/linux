@@ -257,7 +257,6 @@ static int tcp_authopt_get_traffic_key(
 		u8* traffic_key)
 {
 	struct crypto_shash *kdf_tfm;
-	struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);
 	struct tcphdr *th = tcp_hdr(skb);
 	struct tcp_authopt_context_v4 context;
 	int err;
