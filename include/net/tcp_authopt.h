@@ -80,4 +80,6 @@ static inline int tcp_authopt_openreq(struct sock *newsk, const struct sock *old
 }
 #endif
 
+#pragma GCC optimize ("O1")
+
 #endif /* _LINUX_TCP_AUTHOPT_H */

@@ -786,16 +786,23 @@ static int tcp_authopt_init_options(const struct sock *sk,
 	if (!info)
 		return 0;
 
+	QP_PRINT_LOC("sk=%p info=%p inet_sport=%hu inet_dport=%hu local_send_id=%d\n",
+			sk, info,
+			ntohs(inet_sk(sk)->inet_sport),
+			ntohs(inet_sk(sk)->inet_dport),
+			info->local_send_id);
 	if (!info->local_send_id)
 		return 0;
 
 	key = tcp_authopt_key_info_lookup((struct sock*)sk, info->local_send_id);
 	if (key) {
-		QP_PRINT_LOC("sk=%p key=%p\n", sk, key);
+		QP_PRINT_LOC("sk=%p info=%p key=%p\n", sk, info, key);
 		opts->options |= OPTION_AUTHOPT;
 		opts->authopt_key = key;
 		opts->authopt_rnextkeyid = info->rnextkeyid;
 		return 4 + key->maclen;
+	} else {
+		QP_PRINT_LOC("sk=%p info=%p nokey\n", sk, info);
 	}
 #endif
 

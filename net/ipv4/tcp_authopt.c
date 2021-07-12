@@ -68,21 +68,27 @@ static void tcp_authopt_key_del(struct sock *sk, struct tcp_authopt_key_info *ke
 	kfree_rcu(key, rcu);
 }
 
-void tcp_authopt_clear(struct sock *sk)
+/* free info and keys but don't touch tp->authopt_info */
+void __tcp_authopt_info_free(struct sock *sk, struct tcp_authopt_info *info)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
-	struct tcp_authopt_info *info;
-	struct tcp_authopt_key_info *key;
 	struct hlist_node *n;
+	struct tcp_authopt_key_info *key;
 
-	if (!tp->authopt_info)
-		return;
-
-	info = rcu_dereference_protected(tp->authopt_info, 1);
 	hlist_for_each_entry_safe(key, n, &info->head, node)
 		tcp_authopt_key_del(sk, key);
-	kfree_rcu(rcu_dereference_protected(tp->authopt_info, 1), rcu);
-	tp->authopt_info = NULL;
+	kfree_rcu(info, rcu);
+}
+
+/* free everything and clear tcp_sock.authopt_info to NULL */
+void tcp_authopt_clear(struct sock *sk)
+{
+	struct tcp_authopt_info *info;
+
+	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
+	if (info) {
+		__tcp_authopt_info_free(sk, info);
+		tcp_sk(sk)->authopt_info = NULL;
+	}
 }
 
 int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
@@ -150,32 +156,63 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	return 0;
 }
 
+static int tcp_authopt_clone_keys(
+		struct sock *newsk,
+		const struct sock *oldsk,
+		struct tcp_authopt_info *new_info,
+		struct tcp_authopt_info *old_info)
+{
+	struct tcp_authopt_key_info* old_key;
+	struct tcp_authopt_key_info* new_key;
+
+	hlist_for_each_entry_rcu(old_key, &old_info->head, node, lockdep_sock_is_held(sk)) {
+		new_key = sock_kmalloc(newsk, sizeof(*new_key), GFP_KERNEL);
+		if (!new_key)
+			return -ENOMEM;
+		memcpy(new_key, old_key, sizeof(*new_key));
+		hlist_add_head_rcu(&new_key->node, &new_info->head);
+	}
+
+	return 0;
+}
+
+/** Called to create accepted sockets.
+ * 
+ *  Need to copy authopt info from listen socket.
+ */
 int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct request_sock *req)
 {
 	struct tcp_authopt_info *old_info;
 	struct tcp_authopt_info *new_info;
+	int err;
 
 	old_info = rcu_dereference(tcp_sk(oldsk)->authopt_info);
 	if (!old_info)
 		return 0;
 
-	if ((new_info = rcu_dereference(tcp_sk(newsk)->authopt_info))) {
+	if ((new_info = rcu_dereference(tcp_sk(newsk)->authopt_info)))
 		QP_PRINT_LOC("unexpected newsk=%p has authopt_info=%p oldsk=%p old_authopt_info=%p\n",
 				newsk, new_info,
 				oldsk, old_info);
-	}
 	new_info = kmalloc(sizeof(*new_info), GFP_KERNEL | __GFP_ZERO);
 	if (!new_info)
 		return -ENOMEM;
 
 	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
-	INIT_HLIST_HEAD(&new_info->head);
 	new_info->src_isn = tcp_rsk(req)->snt_isn;
 	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
+	new_info->local_send_id = old_info->local_send_id;
+	INIT_HLIST_HEAD(&new_info->head);
+	err = tcp_authopt_clone_keys(newsk, oldsk, new_info, old_info);
+	if (err) {
+		__tcp_authopt_info_free(newsk, new_info);
+		return err;
+	}
+	
+	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, new_info);
 	QP_PRINT_LOC("oldsk=%p newsk=%p src_isn=%u dst_isn=%u\n",
 			oldsk, newsk,
 			new_info->src_isn, new_info->dst_isn);
-	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, new_info);
 
 	return 0;
 }

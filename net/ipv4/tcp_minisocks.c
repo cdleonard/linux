@@ -30,6 +30,7 @@
 #include <net/inet_common.h>
 #include <net/xfrm.h>
 #include <net/busy_poll.h>
+#include <qp/qp.h>
 
 static bool tcp_in_window(u32 seq, u32 end_seq, u32 s_win, u32 e_win)
 {
@@ -468,6 +469,9 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 	if (!newsk)
 		return NULL;
 
+	if (rcu_dereference(tcp_sk(newsk)->authopt_info))
+		QP_PRINT_LOC("unexpected sk=%p has authopt_info=%p\n",
+				newsk, rcu_dereference(tcp_sk(newsk)->authopt_info));
 	newicsk = inet_csk(newsk);
 	newtp = tcp_sk(newsk);
 	oldtp = tcp_sk(sk);
