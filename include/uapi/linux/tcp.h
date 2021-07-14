@@ -347,39 +347,38 @@ struct tcp_diag_md5sig {
 /* for TCP_AUTHOPT socket option */
 #define TCP_AUTHOPT_MAXKEYLEN	80
 
-#define TCP_AUTHOPT_KDF_HMAC_SHA1		1
-#define TCP_AUTHOPT_KDF_AES_128_CMAC		2
-#define TCP_AUTHOPT_MAC_HMAC_SHA_1_96		1
-#define TCP_AUTHOPT_MAC_AES_128_CMAC_96		2
+#define TCP_AUTHOPT_ALG_HMAC_SHA_1_96		1
+#define TCP_AUTHOPT_ALG_AES_128_CMAC_96		2
 
 /* Per-socket options */
 struct tcp_authopt {
+	/* No flags currently defined */
 	__u32	flags;
-	/* local_id of preferred output key or 0 to disable */
+	/* local_id of preferred output key */
 	__u32	local_send_id;
 };
 
-/* delete the key by ID: */
+/* Delete the key by local_id and ignore all fields */
 #define TCP_AUTHOPT_KEY_DEL		(1 << 0)
+/* Exclude TCP options from signature */
 #define TCP_AUTHOPT_KEY_EXCLUDE_OPTS	(1 << 1)
 
 /* Per-key options
  * Each key is identified by a non-zero local_id which is managed by the application.
  */
 struct tcp_authopt_key {
+	/* Mix of TCP_AUTHOPT_KEY_ flags */
 	__u32	flags;
-	/* local identifier */
+	/* Local identifier */
 	__u32	local_id;
 	/* SendID on the network */
 	__u8	send_id;
 	/* RecvID on the network */
 	__u8	recv_id;
-	/* One of the TCP_AUTHOPT_KDF_* constant */
-	__u8	kdf;
-	/* One of the TCP_AUTHOPT_MAC_* constant */
-	__u8	mac;
+	/* One of the TCP_AUTHOPT_ALG_* constant */
+	__u8	alg;
 	/* Length of the key buffer */
-	__u16	keylen;
+	__u8	keylen;
 	__u8	key[TCP_AUTHOPT_MAXKEYLEN];
 };
 

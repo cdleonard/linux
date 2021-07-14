@@ -118,18 +118,14 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 		return 0;
 	}
 
-	if (opt.kdf == TCP_AUTHOPT_KDF_HMAC_SHA1)
+	/* check the algorithm */
+	if (opt.alg == TCP_AUTHOPT_ALG_HMAC_SHA_1_96) {
 		traffic_key_len = 20;
-	else if (opt.kdf == TCP_AUTHOPT_KDF_HMAC_SHA1)
+		maclen = 12;
+	} else if (opt.alg == TCP_AUTHOPT_ALG_AES_128_CMAC_96) {
 		traffic_key_len = 16;
-	else
-		return -ENOSYS;
-
-	if (opt.kdf == TCP_AUTHOPT_MAC_HMAC_SHA_1_96)
 		maclen = 12;
-	else if (opt.kdf == TCP_AUTHOPT_MAC_AES_128_CMAC_96)
-		maclen = 12;
-	else
+	} else
 		return -ENOSYS;
 
 	/* If an old value exists for same local_id it is deleted */
@@ -144,8 +140,7 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	key_info->flags = opt.flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS;
 	key_info->send_id = opt.send_id;
 	key_info->recv_id = opt.recv_id;
-	key_info->kdf = opt.kdf;
-	key_info->mac = opt.mac;
+	key_info->alg = opt.alg;
 	key_info->keylen = opt.keylen;
 	memcpy(key_info->key, opt.key, opt.keylen);
 	key_info->maclen = maclen;
@@ -261,7 +256,7 @@ static int tcp_authopt_get_traffic_key(
 	struct tcp_authopt_context_v4 context;
 	int err;
 
-	if (key->kdf == TCP_AUTHOPT_KDF_HMAC_SHA1)
+	if (key->alg == TCP_AUTHOPT_ALG_HMAC_SHA_1_96)
 		kdf_tfm = crypto_alloc_shash("hmac(sha1)", 0, 0);
 	else
 		return -EINVAL;
@@ -497,7 +492,7 @@ int tcp_authopt_hash(
 	if (err)
 		return err;
 
-	if (key->mac == TCP_AUTHOPT_MAC_HMAC_SHA_1_96)
+	if (key->alg == TCP_AUTHOPT_ALG_HMAC_SHA_1_96)
 		tfm = crypto_alloc_shash("hmac(sha1)", 0, 0);
 	else
 		return -EINVAL;

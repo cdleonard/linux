@@ -12,7 +12,7 @@ struct tcp_authopt_key_info {
 	u32 flags;
 	/* Wire identifiers */
 	u8 send_id, recv_id;
-	u8 kdf, mac;
+	u8 alg;
 	u8 keylen;
 	u8 key[TCP_AUTHOPT_MAXKEYLEN];
 	u8 maclen;
