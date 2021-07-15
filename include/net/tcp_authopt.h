@@ -20,10 +20,6 @@ struct tcp_authopt_key_info {
 	struct rcu_head rcu;
 };
 
-/* All current algorithms have a mac length of 12 */
-#define TCP_AUTHOPT_MAXMACLEN	12
-#define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN	20
-
 /* Per-socket information regarding tcp_authopt */
 struct tcp_authopt_info {
 	struct hlist_head head;
@@ -50,6 +46,14 @@ static inline int tcp_authopt_openreq(struct sock *newsk, const struct sock *old
 	else
 		return __tcp_authopt_openreq(newsk, oldsk, req);
 }
+int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp_authopt_info *info);
+static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb) {
+	struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
+	if (info)
+		return __tcp_authopt_inbound_check(sk, skb, info);
+	else
+		return 0;
+}
 #else
 static inline struct tcp_authopt_key_info* tcp_authopt_key_info_lookup(struct sock *sk, int key_id) {
 	return NULL;
@@ -69,6 +73,9 @@ static inline int tcp_authopt_hash(
 	return -ENOSYS;
 }
 static inline int tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct request_sock *req) {
+	return 0;
+}
+static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb) {
 	return 0;
 }
 #endif

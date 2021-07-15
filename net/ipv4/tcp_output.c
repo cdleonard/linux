@@ -1420,8 +1420,7 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 	if (opts.authopt_key) {
 		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
 		err = tcp_authopt_hash(opts.hash_location, opts.authopt_key, sk, skb);
-		if (err)
-			BUG();
+		WARN_ON(err); // FIXME
 	}
 #endif
 
@@ -3664,8 +3663,7 @@ struct sk_buff *tcp_make_synack(const struct sock *sk, struct dst_entry *dst,
 	if (opts.authopt_key) {
 		int err;
 		err = tcp_authopt_hash(opts.hash_location, opts.authopt_key, req_to_sk(req), skb);
-		if (err)
-			BUG();
+		WARN_ON(err); // FIXME
 	}
 #endif
 

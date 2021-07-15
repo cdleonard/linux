@@ -6,6 +6,10 @@
 #include <crypto/hash.h>
 #include <trace/events/tcp.h>
 
+/* All current algorithms have a mac length of 12 but crypto API digestsize can be larger */
+#define TCP_AUTHOPT_MAXMACBUF	20
+#define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN	20
+
 struct tcp_authopt_key_info* __tcp_authopt_key_info_lookup(struct sock *sk, struct tcp_authopt_info* info, int key_id)
 {
 	struct tcp_authopt_key_info* key;
@@ -252,6 +256,7 @@ static int tcp_authopt_get_traffic_key(
 		struct sock *sk,
 		struct sk_buff *skb,
 		struct tcp_authopt_key_info *key,
+		bool input,
 		u8* traffic_key)
 {
 	struct crypto_shash *kdf_tfm;
@@ -267,19 +272,25 @@ static int tcp_authopt_get_traffic_key(
 		return PTR_ERR(kdf_tfm);
 	BUG_ON(crypto_shash_digestsize(kdf_tfm) != key->traffic_key_len);
 
+	/* Addresses from packet on input and from socket on output
+	 * This is because output has is computed before prepending IP
+	 */
+	if (input) {
+		context.saddr = ip_hdr(skb)->saddr;
+		context.daddr = ip_hdr(skb)->daddr;
+	} else {
+		context.saddr = sk->sk_rcv_saddr;
+		context.daddr = sk->sk_daddr;
+	}
+	/* TCP ports from header */
+	context.sport = th->source;
+	context.dport = th->dest;
+
+	/* special cases for SYN and SYN/ACK */
 	if (th->syn && !th->ack) {
-		context.saddr = inet_sk(sk)->inet_saddr;
-		context.daddr = inet_sk(sk)->inet_daddr;
-		context.sport = inet_sk(sk)->inet_sport;
-		context.dport = inet_sk(sk)->inet_dport;
 		context.sisn = th->seq;
 		context.disn = 0;
 	} else if (th->syn && th->ack) {
-		/* There is no inet_sk for synack */
-		context.saddr = sk->sk_rcv_saddr;
-		context.daddr = sk->sk_daddr;
-		context.sport = th->source;
-		context.dport = th->dest;
 		context.sisn = th->seq;
 		context.disn = htonl(ntohl(th->ack_seq) - 1);
 	} else {
@@ -289,17 +300,19 @@ static int tcp_authopt_get_traffic_key(
 			err = -EINVAL;
 			goto out;
 		}
-		context.saddr = inet_sk(sk)->inet_saddr;
-		context.daddr = inet_sk(sk)->inet_daddr;
-		context.sport = inet_sk(sk)->inet_sport;
-		context.dport = inet_sk(sk)->inet_dport;
-		context.sisn = htonl(authopt_info->src_isn);
-		context.disn = htonl(authopt_info->dst_isn);
+		/* Initial sequence numbers for ESTABLISHED connections from info */
+		if (input) {
+			context.sisn = htonl(authopt_info->dst_isn);
+			context.disn = htonl(authopt_info->src_isn);
+		} else {
+			context.sisn = htonl(authopt_info->src_isn);
+			context.disn = htonl(authopt_info->dst_isn);
+		}
 	}
 
-	//printk("context: %*ph\n", (int)sizeof(context), (u8*)&context);
+	printk("context: %*ph input=%d%s%s\n", (int)sizeof(context), (u8*)&context, input, th->syn ? " SYN" : "", th->ack ? " ACK" : "");
 	err = tcp_authopt_traffic_key_v4(kdf_tfm, key->key, key->keylen, &context, traffic_key);
-	//printk("traffic_key: %*phN\n", 20, traffic_key);
+	printk("traffic_key: %*phN\n", 20, traffic_key);
 
 out:
 	crypto_free_shash(kdf_tfm);
@@ -356,11 +369,21 @@ static int tcp_authopt_hash_hdr_v4(
 	return 0;
 }
 
+/* TCP authopt as found in header */
+struct tcphdr_authopt
+{
+	u8 num;
+	u8 len;
+	u8 keyid;
+	u8 rnextkeyid;
+	u8 mac[0];
+};
+
 /* Find TCP_AUTHOPT in header.
  *
  * Returns pointer to TCP_AUTHOPT or NULL if not found.
  */
-u8 *tcp_authopt_find_option(struct tcphdr *th)
+static u8 *tcp_authopt_find_option(struct tcphdr *th)
 {
 	int length = (th->doff << 2) - sizeof(*th);
 	u8 *ptr = (u8 *)(th + 1);
@@ -505,24 +528,21 @@ static int tcp_authopt_hash_v4(
 	return crypto_shash_final(desc, output_mac);
 }
 
-int tcp_authopt_hash(
-		char *hash_location,
-		struct tcp_authopt_key_info *key,
+int __tcp_authopt_calc_mac(
 		struct sock *sk,
-		struct sk_buff *skb)
+		struct sk_buff *skb,
+		struct tcp_authopt_key_info *key,
+		bool input,
+		char *macbuf)
 {
 	struct crypto_shash *tfm;
 	u8 traffic_key[TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN];
-	/* MAC inside option is truncated to 12 bytes but crypto API needs output
-	 * buffer to be large enough so we use a buffer on the stack.
-	 */
-	u8 macbuf[16];
 	int err;
 
 	if (sk->sk_family != AF_INET)
-		return -ENOSYS;
+		return -EINVAL;
 	BUG_ON(key->traffic_key_len > sizeof(traffic_key));
-	err = tcp_authopt_get_traffic_key(sk, skb, key, traffic_key);
+	err = tcp_authopt_get_traffic_key(sk, skb, key, input, traffic_key);
 	if (err)
 		return err;
 
@@ -532,8 +552,8 @@ int tcp_authopt_hash(
 		return -EINVAL;
 	if (IS_ERR(tfm))
 		return PTR_ERR(tfm);
-	if (crypto_shash_digestsize(tfm) < sizeof(macbuf)) {
-		err = -ENOBUFS;
+	if (crypto_shash_digestsize(tfm) > TCP_AUTHOPT_MAXMACBUF) {
+		err = -EINVAL;
 		goto out_free_tfm;
 	}
 	err = crypto_shash_setkey(tfm, traffic_key, key->traffic_key_len);
@@ -542,19 +562,82 @@ int tcp_authopt_hash(
 
 	err = tcp_authopt_hash_v4(tfm,
 			skb,
-			sk->sk_rcv_saddr,
-			sk->sk_daddr,
+			input ? ip_hdr(skb)->saddr : sk->sk_rcv_saddr,
+			input ? ip_hdr(skb)->daddr : sk->sk_rcv_saddr,
 			tcp_hdr(skb),
 			!(key->flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS),
 			macbuf);
-	if (err)
-		goto out_free_tfm;
-	memcpy(hash_location, macbuf, key->maclen);
-	//pr_warn("mac: %*phN\n", key->maclen, hash_location);
-
-	return 0;
+	pr_warn("mac: %*phN\n", key->maclen, macbuf);
 
 out_free_tfm:
 	crypto_free_shash(tfm);
 	return err;
+}
+
+int tcp_authopt_hash(
+		char *hash_location,
+		struct tcp_authopt_key_info *key,
+		struct sock *sk,
+		struct sk_buff *skb)
+{
+	/* MAC inside option is truncated to 12 bytes but crypto API needs output
+	 * buffer to be large enough so we use a buffer on the stack.
+	 */
+	u8 macbuf[TCP_AUTHOPT_MAXMACBUF];
+	int err;
+
+	BUG_ON(key->maclen > sizeof(macbuf));
+	err = __tcp_authopt_calc_mac(sk, skb, key, false, macbuf);
+	if (err) {
+		memset(hash_location, 0, key->maclen);
+		return err;
+	}
+	memcpy(hash_location, macbuf, key->maclen);
+
+	return 0;
+}
+
+static struct tcp_authopt_key_info* tcp_authopt_inbound_key_lookup(
+		struct sock *sk,
+		struct tcp_authopt_info *info,
+		u8 recv_id)
+{
+	struct tcp_authopt_key_info *key;
+
+	/* multiple matches will cause occasional failures */
+	hlist_for_each_entry_rcu(key, &info->head, node, 0)
+		if (key->recv_id == recv_id)
+			return key;
+
+	return NULL;
+}
+
+int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp_authopt_info *info)
+{
+	struct tcphdr *th = (struct tcphdr*)skb_transport_header(skb);
+	struct tcphdr_authopt *opt = (struct tcphdr_authopt*)tcp_authopt_find_option(th);
+	struct tcp_authopt_key_info *key;
+	u8 macbuf[16];
+	int err;
+
+	/* wrong, should reject if missing key: */
+	if (!opt)
+		return 0;
+
+	key = tcp_authopt_inbound_key_lookup(sk, info, opt->keyid);
+	/* bad inbound key len */
+	if (key->maclen + 4 != opt->len)
+		return -EINVAL;
+
+	err = __tcp_authopt_calc_mac(sk, skb, key, true, macbuf);
+	if (err)
+		return err;
+
+	if (memcmp(macbuf, opt->mac, key->maclen)) {
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
+		net_info_ratelimited("TCP Authentication Failed\n");
+		return -EINVAL;
+	}
+
+	return 0;
 }
