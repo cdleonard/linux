@@ -356,6 +356,42 @@ static int tcp_authopt_hash_hdr_v4(
 	return 0;
 }
 
+/* Find TCP_AUTHOPT in header.
+ *
+ * Returns pointer to TCP_AUTHOPT or NULL if not found.
+ */
+u8 *tcp_authopt_find_option(struct tcphdr *th)
+{
+	int length = (th->doff << 2) - sizeof(*th);
+	u8 *ptr = (u8 *)(th + 1);
+
+	while (length >= 2) {
+		int opcode = *ptr++;
+		int opsize;
+
+		switch (opcode) {
+		case TCPOPT_EOL:
+			return NULL;
+		case TCPOPT_NOP:
+			length--;
+			continue;
+		default:
+			if (length < 2)
+				return NULL;
+			opsize = *ptr++;
+			if (opsize < 2)
+				return NULL;
+			if (opsize > length)
+				return NULL;
+			if (opcode == TCPOPT_AUTHOPT)
+				return ptr - 2;
+		}
+		ptr += opsize - 2;
+		length -= opsize;
+	}
+	return NULL;
+}
+
 /** Hash tcphdr options.
  *  If include_options is false then only the TCPOPT_AUTHOPT option itself is hashed
  *  Maybe we could skip option parsing by asuming the AUTHOPT header is at hash_location-4?
@@ -370,40 +406,29 @@ static int tcp_authopt_hash_opts(
 	u8 *tcp_opts = (u8*)(th + 1);
 	/* end of options */
 	u8 *tcp_data = ((u8*)th) + th->doff * 4;
-	/* start of final hash block */
-	u8 *tcp_option_hash_ptr = tcp_opts;
-	u8 *p = tcp_opts;
-	u8 len;
+	/* pointer to TCPOPT_AUTHOPT */
+	u8 *authopt_ptr = tcp_authopt_find_option(th);
+	u8 authopt_len;
+	
+	if (!authopt_ptr)
+		return -EINVAL;
+	authopt_len = *(authopt_ptr + 1);
 
-	while (true) {
-		if (p >= tcp_data)
-			break;
-		if (*p == TCPOPT_NOP) {
-			++p;
-			continue;
-		}
-		if (*p == TCPOPT_EOL)
-			break;
-		len = *(p + 1);
-		if (p + len > tcp_data)
-			return -EINVAL;
-		if (*p == TCPOPT_AUTHOPT) {
-			if (include_options)
-				err = crypto_shash_update(desc, tcp_opts, p + 4 - tcp_opts);
-			else
-				err = crypto_shash_update(desc, p, 4);
-			if (err)
-				return err;
-			/* Replace hash itself with zeros */
-			err = crypto_shash_update_zero(desc, len - 4);
-			if (err)
-				return err;
-			tcp_option_hash_ptr = p + len;
-		}
-		p += len;
-	}
 	if (include_options) {
-		err = crypto_shash_update(desc, tcp_option_hash_ptr, tcp_data - tcp_option_hash_ptr);
+		err = crypto_shash_update(desc, tcp_opts, authopt_ptr - tcp_opts + 4);
+		if (err)
+			return err;
+		err = crypto_shash_update_zero(desc, authopt_len - 4);
+		if (err)
+			return err;
+		err = crypto_shash_update(desc, authopt_ptr + authopt_len, tcp_data - (authopt_ptr + authopt_len));
+		if (err)
+			return err;
+	} else {
+		err = crypto_shash_update(desc, authopt_ptr, 4);
+		if (err)
+			return err;
+		err = crypto_shash_update_zero(desc, authopt_len - 4);
 		if (err)
 			return err;
 	}
