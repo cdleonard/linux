@@ -1421,7 +1421,7 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
 		err = tcp_authopt_hash(opts.hash_location, opts.authopt_key, sk, skb);
 		if (err)
-			return err;
+			BUG();
 	}
 #endif
 
