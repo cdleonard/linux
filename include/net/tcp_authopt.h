@@ -35,10 +35,6 @@ struct tcp_authopt_info {
 };
 
 #ifdef CONFIG_TCP_AUTHOPT
-static inline struct tcp_authopt_info* tcp_authopt_info_deref(const struct sock *sk)
-{
-	return rcu_dereference(tcp_sk(sk)->authopt_info);
-}
 struct tcp_authopt_key_info* tcp_authopt_key_info_lookup(struct sock *sk, int key_id);
 void tcp_authopt_clear(struct sock *sk);
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
@@ -55,9 +51,6 @@ static inline int tcp_authopt_openreq(struct sock *newsk, const struct sock *old
 		return __tcp_authopt_openreq(newsk, oldsk, req);
 }
 #else
-static inline struct tcp_authopt_info* tcp_authopt_info_deref(struct sock *sk) {
-	return NULL;
-}
 static inline struct tcp_authopt_key_info* tcp_authopt_key_info_lookup(struct sock *sk, int key_id) {
 	return NULL;
 }

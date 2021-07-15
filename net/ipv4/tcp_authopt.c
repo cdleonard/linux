@@ -22,7 +22,7 @@ struct tcp_authopt_key_info* tcp_authopt_key_info_lookup(struct sock *sk, int ke
 	struct tcp_authopt_info* info;
 	struct tcp_authopt_key_info* key;
 
-	info = tcp_authopt_info_deref(sk);
+	info = rcu_dereference_check(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
 		return NULL;
 
@@ -42,10 +42,11 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	if (optlen < sizeof(opt))
 		return -EINVAL;
 
+	BUG_ON(!lockdep_sock_is_held(sk));
 	if (copy_from_sockptr(&opt, optval, sizeof(opt)))
 		return -EFAULT;
 
-	info = rcu_dereference_protected(tp->authopt_info, lockdep_sock_is_held(sk));
+	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info) {
 		info = kmalloc(sizeof(*info), GFP_KERNEL | __GFP_ZERO);
 		if (!info)
@@ -109,8 +110,12 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	if (opt.local_id == 0)
 		return -EINVAL;
 
+	/* must set authopt before setting keys */
+	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
+	if (!info)
+		return -EINVAL;
+
 	if (opt.flags & TCP_AUTHOPT_KEY_DEL) {
-		info = tcp_authopt_info_deref(sk);
 		key_info = __tcp_authopt_key_info_lookup(sk, info, opt.local_id);
 		if (!key_info)
 			return -ENOENT;
@@ -129,7 +134,6 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 		return -ENOSYS;
 
 	/* If an old value exists for same local_id it is deleted */
-	info = tcp_authopt_info_deref(sk);
 	key_info = __tcp_authopt_key_info_lookup(sk, info, opt.local_id);
 	if (key_info)
 		tcp_authopt_key_del(sk, key_info);
@@ -198,7 +202,6 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 		__tcp_authopt_info_free(newsk, new_info);
 		return err;
 	}
-	
 	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, new_info);
 
 	return 0;
@@ -280,7 +283,12 @@ static int tcp_authopt_get_traffic_key(
 		context.sisn = th->seq;
 		context.disn = htonl(ntohl(th->ack_seq) - 1);
 	} else {
-		struct tcp_authopt_info *authopt_info = tcp_authopt_info_deref(sk);
+		struct tcp_authopt_info *authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		/* authopt was removed from under us, maybe socket deleted? */
+		if (!authopt_info) {
+			err = -EINVAL;
+			goto out;
+		}
 		context.saddr = inet_sk(sk)->inet_saddr;
 		context.daddr = inet_sk(sk)->inet_daddr;
 		context.sport = inet_sk(sk)->inet_sport;
@@ -293,6 +301,7 @@ static int tcp_authopt_get_traffic_key(
 	err = tcp_authopt_traffic_key_v4(kdf_tfm, key->key, key->keylen, &context, traffic_key);
 	//printk("traffic_key: %*phN\n", 20, traffic_key);
 
+out:
 	crypto_free_shash(kdf_tfm);
 	return err;
 }
