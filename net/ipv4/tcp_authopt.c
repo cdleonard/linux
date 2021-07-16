@@ -211,45 +211,93 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	return 0;
 }
 
-struct tcp_authopt_context_v4 {
-	__be32 saddr;
-	__be32 daddr;
-	__be16 sport;
-	__be16 dport;
-	__be32 sisn;
-	__be32 disn;
-};
-
-static int tcp_authopt_traffic_key_v4(
-		struct crypto_shash *tfm,
-		u8* key,
-		unsigned int keylen,
-		struct tcp_authopt_context_v4 *context,
-		u8 *traffic_key)
+/* feed traffic key into shash */
+static int tcp_authopt_shash_traffic_key(
+		struct shash_desc *desc,
+		struct sock *sk,
+		struct sk_buff *skb,
+		bool input,
+		bool ipv6)
 {
-	SHASH_DESC_ON_STACK(desc, tfm);
+	struct tcphdr *th = tcp_hdr(skb);
 	int err;
+	__be32 sisn, disn;
 
-	desc->tfm = tfm;
-	err = crypto_shash_setkey(tfm, key, keylen);
-	if (err)
-		return err;
-
-	err = crypto_shash_init(desc);
-	if (err)
-		return err;
 	// RFC5926 section 3.1.1.1
 	err = crypto_shash_update(desc, "\x01TCP-AO", 7);
 	if (err)
 		return err;
-	err = crypto_shash_update(desc, (u8*)context, sizeof(*context));
+
+	/* Addresses from packet on input and from socket on output
+	 * This is because on output MAC is computed before prepending IP header
+	 */
+	if (input) {
+		if (ipv6)
+			err = crypto_shash_update(desc, (u8*)&ipv6_hdr(skb)->saddr, 32);
+		else
+			err = crypto_shash_update(desc, (u8*)&ip_hdr(skb)->saddr, 8);
+		if (err)
+			return err;
+	} else {
+		if (ipv6) {
+			err = crypto_shash_update(desc, (u8*)&sk->sk_v6_rcv_saddr, 16);
+			if (err)
+				return err;
+			err = crypto_shash_update(desc, (u8*)&sk->sk_v6_daddr, 16);
+			if (err)
+				return err;
+		} else {
+			err = crypto_shash_update(desc, (u8*)&sk->sk_rcv_saddr, 4);
+			if (err)
+				return err;
+			err = crypto_shash_update(desc, (u8*)&sk->sk_daddr, 4);
+			if (err)
+				return err;
+		}
+	}
+
+	/* TCP ports from header */
+	err = crypto_shash_update(desc, (u8*)&th->source, 4);
 	if (err)
 		return err;
+
+	/* special cases for SYN and SYN/ACK */
+	if (th->syn && !th->ack) {
+		sisn = th->seq;
+		disn = 0;
+	} else if (th->syn && th->ack) {
+		sisn = th->seq;
+		disn = htonl(ntohl(th->ack_seq) - 1);
+	} else {
+		struct tcp_authopt_info *authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		/* authopt was removed from under us, maybe socket deleted? */
+		/* should pass this as an argument instead */
+		if (!authopt_info) {
+			return -EINVAL;
+		}
+		/* Initial sequence numbers for ESTABLISHED connections from info */
+		if (input) {
+			sisn = htonl(authopt_info->dst_isn);
+			disn = htonl(authopt_info->src_isn);
+		} else {
+			sisn = htonl(authopt_info->src_isn);
+			disn = htonl(authopt_info->dst_isn);
+		}
+	}
+
+	err = crypto_shash_update(desc, (u8*)&sisn, 4);
+	if (err)
+		return err;
+	err = crypto_shash_update(desc, (u8*)&disn, 4);
+	if (err)
+		return err;
+
+	/* This hardcodes sha1 digestsize in bits: */
 	err = crypto_shash_update(desc, "\x00\xa0", 2);
 	if (err)
 		return err;
 
-	return crypto_shash_final(desc, traffic_key);
+	return 0;
 }
 
 static int tcp_authopt_get_traffic_key(
@@ -257,11 +305,11 @@ static int tcp_authopt_get_traffic_key(
 		struct sk_buff *skb,
 		struct tcp_authopt_key_info *key,
 		bool input,
+		bool ipv6,
 		u8* traffic_key)
 {
+	SHASH_DESC_ON_STACK(desc, kdf_tfm);
 	struct crypto_shash *kdf_tfm;
-	struct tcphdr *th = tcp_hdr(skb);
-	struct tcp_authopt_context_v4 context;
 	int err;
 
 	if (key->alg == TCP_AUTHOPT_ALG_HMAC_SHA_1_96)
@@ -272,46 +320,22 @@ static int tcp_authopt_get_traffic_key(
 		return PTR_ERR(kdf_tfm);
 	BUG_ON(crypto_shash_digestsize(kdf_tfm) != key->traffic_key_len);
 
-	/* Addresses from packet on input and from socket on output
-	 * This is because output has is computed before prepending IP
-	 */
-	if (input) {
-		context.saddr = ip_hdr(skb)->saddr;
-		context.daddr = ip_hdr(skb)->daddr;
-	} else {
-		context.saddr = sk->sk_rcv_saddr;
-		context.daddr = sk->sk_daddr;
-	}
-	/* TCP ports from header */
-	context.sport = th->source;
-	context.dport = th->dest;
+	err = crypto_shash_setkey(kdf_tfm, key->key, key->keylen);
+	if (err)
+		goto out;
 
-	/* special cases for SYN and SYN/ACK */
-	if (th->syn && !th->ack) {
-		context.sisn = th->seq;
-		context.disn = 0;
-	} else if (th->syn && th->ack) {
-		context.sisn = th->seq;
-		context.disn = htonl(ntohl(th->ack_seq) - 1);
-	} else {
-		struct tcp_authopt_info *authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
-		/* authopt was removed from under us, maybe socket deleted? */
-		if (!authopt_info) {
-			err = -EINVAL;
-			goto out;
-		}
-		/* Initial sequence numbers for ESTABLISHED connections from info */
-		if (input) {
-			context.sisn = htonl(authopt_info->dst_isn);
-			context.disn = htonl(authopt_info->src_isn);
-		} else {
-			context.sisn = htonl(authopt_info->src_isn);
-			context.disn = htonl(authopt_info->dst_isn);
-		}
-	}
+	desc->tfm = kdf_tfm;
+	err = crypto_shash_init(desc);
+	if (err)
+		goto out;
 
-	printk("context: %*ph input=%d%s%s\n", (int)sizeof(context), (u8*)&context, input, th->syn ? " SYN" : "", th->ack ? " ACK" : "");
-	err = tcp_authopt_traffic_key_v4(kdf_tfm, key->key, key->keylen, &context, traffic_key);
+	err = tcp_authopt_shash_traffic_key(desc, sk, skb, input, ipv6);
+	if (err)
+		goto out;
+
+	err = crypto_shash_final(desc, traffic_key);
+	if (err)
+		goto out;
 	printk("traffic_key: %*phN\n", 20, traffic_key);
 
 out:
@@ -535,32 +559,33 @@ int __tcp_authopt_calc_mac(
 		bool input,
 		char *macbuf)
 {
-	struct crypto_shash *tfm;
+	struct crypto_shash *mac_tfm;
 	u8 traffic_key[TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN];
 	int err;
+	bool ipv6 = (sk->sk_family != AF_INET);
 
-	if (sk->sk_family != AF_INET)
+	if (sk->sk_family != AF_INET && sk->sk_family != AF_INET6)
 		return -EINVAL;
 	BUG_ON(key->traffic_key_len > sizeof(traffic_key));
-	err = tcp_authopt_get_traffic_key(sk, skb, key, input, traffic_key);
+	err = tcp_authopt_get_traffic_key(sk, skb, key, input, ipv6, traffic_key);
 	if (err)
 		return err;
 
 	if (key->alg == TCP_AUTHOPT_ALG_HMAC_SHA_1_96)
-		tfm = crypto_alloc_shash("hmac(sha1)", 0, 0);
+		mac_tfm = crypto_alloc_shash("hmac(sha1)", 0, 0);
 	else
 		return -EINVAL;
-	if (IS_ERR(tfm))
-		return PTR_ERR(tfm);
-	if (crypto_shash_digestsize(tfm) > TCP_AUTHOPT_MAXMACBUF) {
+	if (IS_ERR(mac_tfm))
+		return PTR_ERR(mac_tfm);
+	if (crypto_shash_digestsize(mac_tfm) > TCP_AUTHOPT_MAXMACBUF) {
 		err = -EINVAL;
-		goto out_free_tfm;
+		goto out;
 	}
-	err = crypto_shash_setkey(tfm, traffic_key, key->traffic_key_len);
+	err = crypto_shash_setkey(mac_tfm, traffic_key, key->traffic_key_len);
 	if (err)
-		goto out_free_tfm;
+		goto out;
 
-	err = tcp_authopt_hash_v4(tfm,
+	err = tcp_authopt_hash_v4(mac_tfm,
 			skb,
 			input ? ip_hdr(skb)->saddr : sk->sk_rcv_saddr,
 			input ? ip_hdr(skb)->daddr : sk->sk_rcv_saddr,
@@ -569,8 +594,8 @@ int __tcp_authopt_calc_mac(
 			macbuf);
 	pr_warn("mac: %*phN\n", key->maclen, macbuf);
 
-out_free_tfm:
-	crypto_free_shash(tfm);
+out:
+	crypto_free_shash(mac_tfm);
 	return err;
 }
 
