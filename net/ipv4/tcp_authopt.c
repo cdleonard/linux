@@ -240,6 +240,10 @@ static int tcp_authopt_shash_traffic_key(
 			return err;
 	} else {
 		if (ipv6) {
+			struct in6_addr *saddr;
+			struct in6_addr *daddr;
+			saddr = &sk->sk_v6_rcv_saddr;
+			daddr = &sk->sk_v6_daddr;
 			err = crypto_shash_update(desc, (u8*)&sk->sk_v6_rcv_saddr, 16);
 			if (err)
 				return err;
@@ -336,7 +340,7 @@ static int tcp_authopt_get_traffic_key(
 	err = crypto_shash_final(desc, traffic_key);
 	if (err)
 		goto out;
-	printk("traffic_key: %*phN\n", 20, traffic_key);
+	//printk("traffic_key: %*phN\n", 20, traffic_key);
 
 out:
 	crypto_free_shash(kdf_tfm);
@@ -357,41 +361,43 @@ static int crypto_shash_update_zero(struct shash_desc *desc, int len)
 	return 0;
 }
 
-static int tcp_authopt_hash_hdr_v4(
+static int tcp_authopt_hash_tcp4_pseudoheader(
 		struct shash_desc *desc,
-		__be32 sne,
 		__be32 saddr,
 		__be32 daddr,
-		struct tcphdr *th,
 		int nbytes)
 {
-	int err;
+	struct tcp4_pseudohdr phdr = {
+		.saddr = saddr,
+		.daddr = daddr,
+		.pad = 0,
+		.protocol = IPPROTO_TCP,
+		.len = htons(nbytes)
+	};
+	return crypto_shash_update(desc, (u8*)&phdr, sizeof(phdr));
+}
 
-	err = crypto_shash_update(desc, (u8*)&sne, 4);
+static int tcp_authopt_hash_tcp6_pseudoheader(
+		struct shash_desc *desc,
+		struct in6_addr *saddr,
+		struct in6_addr *daddr,
+		u32 plen)
+{
+	int err;
+	u32 buf[2];
+
+	buf[0] = htonl(plen);
+	buf[1] = htonl(IPPROTO_TCP);
+
+	err = crypto_shash_update(desc, (u8*)saddr, sizeof(*saddr));
 	if (err)
 		return err;
-
-	{
-		struct tcp4_pseudohdr phdr = {
-			.saddr = saddr,
-			.daddr = daddr,
-			.pad = 0,
-			.protocol = IPPROTO_TCP,
-			.len = htons(nbytes)
-		};
-		err = crypto_shash_update(desc, (u8*)&phdr, sizeof(phdr));
-		if (err)
-			return err;
-	}
-	{
-		struct tcphdr hashed_th = *th;
-		hashed_th.check = 0;
-		err = crypto_shash_update(desc, (u8*)&hashed_th, sizeof(hashed_th));
-		if (err)
-			return err;
-	}
-	return 0;
+	err = crypto_shash_update(desc, (u8*)daddr, sizeof(*daddr));
+	if (err)
+		return err;
+	return crypto_shash_update(desc, (u8*)&buf, sizeof(buf));
 }
+
 
 /* TCP authopt as found in header */
 struct tcphdr_authopt
@@ -515,41 +521,83 @@ static int skb_shash_frags(
 	return 0;
 }
 
-static int tcp_authopt_hash_v4(
+static int tcp_authopt_hash_packet(
 		struct crypto_shash *tfm,
+		struct sock *sk,
 		struct sk_buff *skb,
-		__be32 saddr,
-		__be32 daddr,
-		struct tcphdr *th,
+		bool input,
+		bool ipv6,
 		bool include_options,
-		u8 *output_mac)
+		u8 *macbuf)
 {
+	struct tcphdr *th = tcp_hdr(skb);
 	SHASH_DESC_ON_STACK(desc, tfm);
 	int err;
+
+	/* NOTE: SNE unimplemented */
+	__be32 sne = 0;
 
 	desc->tfm = tfm;
 	err = crypto_shash_init(desc);
 	if (err)
 		return err;
 
-	err = tcp_authopt_hash_hdr_v4(desc, 0, saddr, daddr, th, skb->len);
+	err = crypto_shash_update(desc, (u8*)&sne, 4);
 	if (err)
 		return err;
+
+	if (ipv6) {
+		struct in6_addr *saddr;
+		struct in6_addr *daddr;
+		if (input) {
+			saddr = &ipv6_hdr(skb)->saddr;
+			daddr = &ipv6_hdr(skb)->daddr;
+		} else {
+			saddr = &sk->sk_v6_rcv_saddr;
+			daddr = &sk->sk_v6_daddr;
+		}
+		err = tcp_authopt_hash_tcp6_pseudoheader(desc, saddr, daddr, skb->len);
+		if (err)
+			return err;
+	} else {
+		__be32 saddr;
+		__be32 daddr;
+		if (input) {
+			saddr = ip_hdr(skb)->saddr;
+			daddr = ip_hdr(skb)->daddr;
+		} else {
+			saddr = sk->sk_rcv_saddr;
+			daddr = sk->sk_daddr;
+		}
+		err = tcp_authopt_hash_tcp4_pseudoheader(desc, saddr, daddr, skb->len);
+		if (err)
+			return err;
+	}
+
+	// TCP header with checksum set to zero
+	{
+		struct tcphdr hashed_th = *th;
+		hashed_th.check = 0;
+		err = crypto_shash_update(desc, (u8*)&hashed_th, sizeof(hashed_th));
+		if (err)
+			return err;
+	}
+
+	// TCP options
 	err = tcp_authopt_hash_opts(desc, th, include_options);
 	if (err)
 		return err;
 
-	{
-		int tholen = th->doff * 4;
-		err = crypto_shash_update(desc, (u8*)th + tholen, skb_headlen(skb) - tholen);
-		if (err)
-			return err;
-	}
+	// Rest of SKB->data
+	err = crypto_shash_update(desc, (u8*)th + th->doff * 4, skb_headlen(skb) - th->doff * 4);
+	if (err)
+		return err;
+
 	err = skb_shash_frags(desc, skb);
 	if (err)
 		return err;
 
-	return crypto_shash_final(desc, output_mac);
+	return crypto_shash_final(desc, macbuf);
 }
 
 int __tcp_authopt_calc_mac(
@@ -585,14 +633,14 @@ int __tcp_authopt_calc_mac(
 	if (err)
 		goto out;
 
-	err = tcp_authopt_hash_v4(mac_tfm,
+	err = tcp_authopt_hash_packet(mac_tfm,
+			sk,
 			skb,
-			input ? ip_hdr(skb)->saddr : sk->sk_rcv_saddr,
-			input ? ip_hdr(skb)->daddr : sk->sk_rcv_saddr,
-			tcp_hdr(skb),
+			input,
+			ipv6,
 			!(key->flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS),
 			macbuf);
-	pr_warn("mac: %*phN\n", key->maclen, macbuf);
+	//printk("mac: %*phN\n", key->maclen, macbuf);
 
 out:
 	crypto_free_shash(mac_tfm);
