@@ -358,6 +358,26 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	return 0;
 }
 
+/* Convert a variable-length key to a 16-byte fixed-length key for AES-CMAC
+ * This is described in RFC5926 section 3.1.1.2
+ */
+static int aes_setkey_derived(struct crypto_shash *tfm, u8 *key, size_t keylen)
+{
+	static const u8 zeros[16] = {0};
+	u8 derived_key[16];
+	int err;
+
+	if (WARN_ON(crypto_shash_digestsize(tfm) != 16))
+		return -EINVAL;
+	err = crypto_shash_setkey(tfm, zeros, sizeof(zeros));
+	if (err)
+		return err;
+	err = crypto_shash_tfm_digest(tfm, key, keylen, derived_key);
+	if (err)
+		return err;
+	return crypto_shash_setkey(tfm, derived_key, sizeof(derived_key));
+}
+
 static int tcp_authopt_get_traffic_key(struct sock *sk,
 				       struct sk_buff *skb,
 				       struct tcp_authopt_key_info *key,
@@ -377,9 +397,15 @@ static int tcp_authopt_get_traffic_key(struct sock *sk,
 		goto out;
 	}
 
-	err = crypto_shash_setkey(kdf_tfm, key->key, key->keylen);
-	if (err)
-		goto out;
+	if (key->alg_id == TCP_AUTHOPT_ALG_AES_128_CMAC_96 && key->keylen != 16) {
+		err = aes_setkey_derived(kdf_tfm, key->key, key->keylen);
+		if (err)
+			goto out;
+	} else {
+		err = crypto_shash_setkey(kdf_tfm, key->key, key->keylen);
+		if (err)
+			goto out;
+	}
 
 	desc->tfm = kdf_tfm;
 	err = crypto_shash_init(desc);
