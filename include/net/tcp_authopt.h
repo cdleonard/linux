@@ -4,6 +4,8 @@
 
 #include <uapi/linux/tcp.h>
 
+struct tcp_authopt_alg;
+
 /* Representation of a Master Key Tuple as per RFC5925 */
 struct tcp_authopt_key_info {
 	struct hlist_node node;
@@ -12,12 +14,13 @@ struct tcp_authopt_key_info {
 	u32 flags;
 	/* Wire identifiers */
 	u8 send_id, recv_id;
-	u8 alg;
+	u8 alg_id;
 	u8 keylen;
 	u8 key[TCP_AUTHOPT_MAXKEYLEN];
 	u8 maclen;
 	u8 traffic_key_len;
 	struct rcu_head rcu;
+	struct tcp_authopt_alg *alg;
 };
 
 /* Per-socket information regarding tcp_authopt */

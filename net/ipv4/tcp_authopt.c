@@ -10,6 +10,63 @@
 #define TCP_AUTHOPT_MAXMACBUF	20
 #define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN	20
 
+struct tcp_authopt_alg {
+	const char *kdf_name;
+	const char *mac_name;
+	/* One of the TCP_AUTHOPT_ALG_* constants from uapi */
+	u8 alg_id;
+	/* Length of traffic key */
+	u8 traffic_key_len;
+	/* Length of mac in TCP option */
+	u8 maclen;
+};
+
+static struct tcp_authopt_alg tcp_authopt_alg_list[] = {
+	{
+		.alg_id = TCP_AUTHOPT_ALG_HMAC_SHA_1_96,
+		.kdf_name = "hmac(sha1)",
+		.mac_name = "hmac(sha1)",
+		.traffic_key_len = 20,
+		.maclen = 12,
+	},
+	{
+		.alg_id = TCP_AUTHOPT_ALG_AES_128_CMAC_96,
+		.kdf_name = "cmac(aes)",
+		.mac_name = "cmac(aes)",
+		.traffic_key_len = 16,
+		.maclen = 12,
+	},
+};
+
+static inline struct tcp_authopt_alg *tcp_authopt_alg_get(int alg_num)
+{
+	if (alg_num <= 0 || alg_num > 2)
+		return NULL;
+	return &tcp_authopt_alg_list[alg_num - 1];
+}
+
+static struct crypto_shash *tcp_authopt_get_kdf_shash(struct tcp_authopt_key_info *key)
+{
+	return crypto_alloc_shash(key->alg->kdf_name, 0, 0);
+}
+
+static void tcp_authopt_put_kdf_shash(struct tcp_authopt_key_info *key,
+				      struct crypto_shash *tfm)
+{
+	crypto_free_shash(tfm);
+}
+
+static struct crypto_shash *tcp_authopt_get_mac_shash(struct tcp_authopt_key_info *key)
+{
+	return crypto_alloc_shash(key->alg->mac_name, 0, 0);
+}
+
+static void tcp_authopt_put_mac_shash(struct tcp_authopt_key_info *key,
+				      struct crypto_shash *tfm)
+{
+	crypto_free_shash(tfm);
+}
+
 struct tcp_authopt_key_info *__tcp_authopt_key_info_lookup(struct sock *sk,
 							   struct tcp_authopt_info *info,
 							   int key_id)
@@ -102,7 +159,7 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	struct tcp_authopt_key opt;
 	struct tcp_authopt_info *info;
 	struct tcp_authopt_key_info *key_info;
-	u8 traffic_key_len, maclen;
+	struct tcp_authopt_alg *alg;
 
 	if (optlen < sizeof(opt))
 		return -EINVAL;
@@ -130,15 +187,10 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	}
 
 	/* check the algorithm */
-	if (opt.alg == TCP_AUTHOPT_ALG_HMAC_SHA_1_96) {
-		traffic_key_len = 20;
-		maclen = 12;
-	} else if (opt.alg == TCP_AUTHOPT_ALG_AES_128_CMAC_96) {
-		traffic_key_len = 16;
-		maclen = 12;
-	} else {
+	alg = tcp_authopt_alg_get(opt.alg);
+	if (!alg)
 		return -EINVAL;
-	}
+	WARN_ON(alg->alg_id != opt.alg);
 
 	/* If an old value exists for same local_id it is deleted */
 	key_info = __tcp_authopt_key_info_lookup(sk, info, opt.local_id);
@@ -151,11 +203,12 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	key_info->flags = opt.flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS;
 	key_info->send_id = opt.send_id;
 	key_info->recv_id = opt.recv_id;
-	key_info->alg = opt.alg;
+	key_info->alg_id = opt.alg;
+	key_info->alg = alg;
 	key_info->keylen = opt.keylen;
 	memcpy(key_info->key, opt.key, opt.keylen);
-	key_info->maclen = maclen;
-	key_info->traffic_key_len = traffic_key_len;
+	key_info->maclen = alg->maclen;
+	key_info->traffic_key_len = alg->traffic_key_len;
 	hlist_add_head_rcu(&key_info->node, &info->head);
 
 	return 0;
@@ -316,14 +369,11 @@ static int tcp_authopt_get_traffic_key(struct sock *sk,
 	struct crypto_shash *kdf_tfm;
 	int err;
 
-	if (key->alg == TCP_AUTHOPT_ALG_HMAC_SHA_1_96)
-		kdf_tfm = crypto_alloc_shash("hmac(sha1)", 0, 0);
-	else
-		return -EINVAL;
+	kdf_tfm = tcp_authopt_get_kdf_shash(key);
 	if (IS_ERR(kdf_tfm))
 		return PTR_ERR(kdf_tfm);
 	if (WARN_ON(crypto_shash_digestsize(kdf_tfm) != key->traffic_key_len)) {
-		err = -ENOBUFS;
+		err = -EINVAL;
 		goto out;
 	}
 
@@ -346,7 +396,7 @@ static int tcp_authopt_get_traffic_key(struct sock *sk,
 	//printk("traffic_key: %*phN\n", 20, traffic_key);
 
 out:
-	crypto_free_shash(kdf_tfm);
+	tcp_authopt_put_kdf_shash(key, kdf_tfm);
 	return err;
 }
 
@@ -621,10 +671,7 @@ int __tcp_authopt_calc_mac(struct sock *sk,
 	if (err)
 		return err;
 
-	if (key->alg == TCP_AUTHOPT_ALG_HMAC_SHA_1_96)
-		mac_tfm = crypto_alloc_shash("hmac(sha1)", 0, 0);
-	else
-		return -EINVAL;
+	mac_tfm = tcp_authopt_get_mac_shash(key);
 	if (IS_ERR(mac_tfm))
 		return PTR_ERR(mac_tfm);
 	if (crypto_shash_digestsize(mac_tfm) > TCP_AUTHOPT_MAXMACBUF) {
@@ -645,7 +692,7 @@ int __tcp_authopt_calc_mac(struct sock *sk,
 	//printk("mac: %*phN\n", key->maclen, macbuf);
 
 out:
-	crypto_free_shash(mac_tfm);
+	tcp_authopt_put_mac_shash(key, mac_tfm);
 	return err;
 }
 
