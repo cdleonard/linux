@@ -276,6 +276,7 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	struct tcphdr *th = tcp_hdr(skb);
 	int err;
 	__be32 sisn, disn;
+	__be16 digestbits = htons(crypto_shash_digestsize(desc->tfm) * 8);
 
 	// RFC5926 section 3.1.1.1
 	err = crypto_shash_update(desc, "\x01TCP-AO", 7);
@@ -350,8 +351,7 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	if (err)
 		return err;
 
-	/* This hardcodes sha1 digestsize in bits: */
-	err = crypto_shash_update(desc, "\x00\xa0", 2);
+	err = crypto_shash_update(desc, (u8 *)&digestbits, 2);
 	if (err)
 		return err;
 
