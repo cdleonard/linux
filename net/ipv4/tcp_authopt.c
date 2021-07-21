@@ -426,11 +426,21 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 		sisn = th->seq;
 		disn = htonl(ntohl(th->ack_seq) - 1);
 	} else {
-		struct tcp_authopt_info *authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
-		/* authopt was removed from under us, maybe socket deleted? */
-		/* should pass this as an argument instead */
-		if (!authopt_info)
+		struct tcp_authopt_info *authopt_info;
+
+		/* Fetching authopt_info like this means it's possible that authopt_info
+		 * was deleted while we were hashing. If that happens we drop the packet
+		 * which should be fine.
+		 *
+		 * A better solution might be to always pass info as a parameter, or
+		 * compute traffic_key for established sockets separately.
+		 */
+		rcu_read_lock();
+		authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		if (!authopt_info) {
+			rcu_read_unlock();
 			return -EINVAL;
+		}
 		/* Initial sequence numbers for ESTABLISHED connections from info */
 		if (input) {
 			sisn = htonl(authopt_info->dst_isn);
@@ -439,6 +449,7 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 			sisn = htonl(authopt_info->src_isn);
 			disn = htonl(authopt_info->dst_isn);
 		}
+		rcu_read_unlock();
 	}
 
 	err = crypto_shash_update(desc, (u8 *)&sisn, 4);
