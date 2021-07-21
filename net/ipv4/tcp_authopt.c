@@ -11,8 +11,8 @@
 #define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN	20
 
 struct tcp_authopt_alg {
-	const char *kdf_name;
-	const char *mac_name;
+	/* Name of algorithm in crypto-api */
+	const char *alg_name;
 	/* One of the TCP_AUTHOPT_ALG_* constants from uapi */
 	u8 alg_id;
 	/* Length of traffic key */
@@ -29,16 +29,14 @@ struct tcp_authopt_alg {
 static struct tcp_authopt_alg tcp_authopt_alg_list[] = {
 	{
 		.alg_id = TCP_AUTHOPT_ALG_HMAC_SHA_1_96,
-		.kdf_name = "hmac(sha1)",
-		.mac_name = "hmac(sha1)",
+		.alg_name = "hmac(sha1)",
 		.traffic_key_len = 20,
 		.maclen = 12,
 		.lock = __SPIN_LOCK_UNLOCKED(tcp_authopt_alg_list[0].lock),
 	},
 	{
 		.alg_id = TCP_AUTHOPT_ALG_AES_128_CMAC_96,
-		.kdf_name = "cmac(aes)",
-		.mac_name = "cmac(aes)",
+		.alg_name = "cmac(aes)",
 		.traffic_key_len = 16,
 		.maclen = 12,
 		.lock = __SPIN_LOCK_UNLOCKED(tcp_authopt_alg_list[1].lock),
@@ -74,7 +72,7 @@ static int tcp_authopt_alg_require(struct tcp_authopt_alg *alg)
 	if (need_init == false)
 		return 0;
 
-	tfm = crypto_alloc_shash(alg->kdf_name, 0, 0);
+	tfm = crypto_alloc_shash(alg->alg_name, 0, 0);
 	if (IS_ERR(tfm))
 		return PTR_ERR(tfm);
 
@@ -91,7 +89,7 @@ static int tcp_authopt_alg_require(struct tcp_authopt_alg *alg)
 	if (!need_init)
 		crypto_free_shash(tfm);
 	else
-		pr_info("initialized tcp-ao %s", alg->kdf_name);
+		pr_info("initialized tcp-ao %s", alg->alg_name);
 
 	return 0;
 }
@@ -110,7 +108,7 @@ static void tcp_authopt_alg_release(struct tcp_authopt_alg *alg)
 	spin_unlock_bh(&alg->lock);
 
 	if (tfm_to_free) {
-		pr_info("released tcp-ao %s", alg->kdf_name);
+		pr_info("released tcp-ao %s", alg->alg_name);
 		crypto_free_shash(tfm_to_free);
 	}
 }
