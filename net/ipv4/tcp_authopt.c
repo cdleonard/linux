@@ -321,7 +321,7 @@ static int tcp_authopt_clone_keys(struct sock *newsk,
 	struct tcp_authopt_key_info *new_key;
 
 	hlist_for_each_entry_rcu(old_key, &old_info->head, node, lockdep_sock_is_held(sk)) {
-		new_key = sock_kmalloc(newsk, sizeof(*new_key), GFP_KERNEL);
+		new_key = sock_kmalloc(newsk, sizeof(*new_key), GFP_ATOMIC);
 		if (!new_key)
 			return -ENOMEM;
 		memcpy(new_key, old_key, sizeof(*new_key));
@@ -346,7 +346,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	if (!old_info)
 		return 0;
 
-	new_info = kmalloc(sizeof(*new_info), GFP_KERNEL | __GFP_ZERO);
+	new_info = kmalloc(sizeof(*new_info), GFP_ATOMIC | __GFP_ZERO);
 	if (!new_info)
 		return -ENOMEM;
 
