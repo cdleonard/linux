@@ -29,7 +29,6 @@ struct tcp_authopt_info {
 	u32 local_send_id;
 	u32 src_isn;
 	u32 dst_isn;
-	u8 rnextkeyid;
 	struct rcu_head rcu;
 };
 
