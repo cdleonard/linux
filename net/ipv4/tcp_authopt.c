@@ -170,20 +170,18 @@ struct tcp_authopt_key_info *__tcp_authopt_key_info_lookup(struct sock *sk,
 	return NULL;
 }
 
-struct tcp_authopt_key_info *tcp_authopt_key_info_lookup(struct sock *sk, int key_id)
+struct tcp_authopt_key_info *tcp_authopt_key_info_lookup(struct sock *sk)
 {
 	struct tcp_authopt_info *info;
-	struct tcp_authopt_key_info *key;
 
 	info = rcu_dereference_check(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
 		return NULL;
 
-	hlist_for_each_entry_rcu(key, &info->head, node, lockdep_sock_is_held(sk))
-		if (key->local_id == key_id)
-			return key;
+	if (!info->local_send_id)
+		return NULL;
 
-	return NULL;
+	return __tcp_authopt_key_info_lookup(sk, info, info->local_send_id);
 }
 
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
