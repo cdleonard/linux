@@ -209,7 +209,14 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 		INIT_HLIST_HEAD(&info->head);
 		rcu_assign_pointer(tp->authopt_info, info);
 	}
+	info->flags = opt.flags & (
+			TCP_AUTHOPT_FLAG_LOCK_KEYID |
+			TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID |
+			TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED);
+	//if (opt.flag & TCP_AUTHOPT_FLAG_LOCK_KEYID)
 	info->local_send_id = opt.local_send_id;
+	if (opt.flags & TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID)
+		info->send_rnextkeyid = opt.send_rnextkeyid;
 
 	return 0;
 }
