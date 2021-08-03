@@ -190,11 +190,13 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	struct tcp_authopt opt;
 	struct tcp_authopt_info *info;
 
-	if (optlen < sizeof(opt))
-		return -EINVAL;
-
 	WARN_ON(!lockdep_sock_is_held(sk));
-	if (copy_from_sockptr(&opt, optval, sizeof(opt)))
+
+	/* If userspace optlen is too short fill the rest with zeros */
+	if (optlen > sizeof(opt))
+		return -EINVAL;
+	memset(&opt, 0, sizeof(opt));
+	if (copy_from_sockptr(&opt, optval, optlen))
 		return -EFAULT;
 
 	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
