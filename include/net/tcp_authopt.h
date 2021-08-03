@@ -42,6 +42,7 @@ struct tcp_authopt_info {
 struct tcp_authopt_key_info *tcp_authopt_key_info_lookup(struct sock *sk);
 void tcp_authopt_clear(struct sock *sk);
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
+int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key);
 int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen);
 int tcp_authopt_hash(
 		char *hash_location,
@@ -77,6 +78,10 @@ static inline struct tcp_authopt_key_info *tcp_authopt_key_info_lookup(struct so
 	return NULL;
 }
 static inline int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
+{
+	return -ENOPROTOOPT;
+}
+static inline int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key)
 {
 	return -ENOPROTOOPT;
 }

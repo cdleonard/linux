@@ -221,6 +221,24 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	return 0;
 }
 
+int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_authopt_info *info;
+
+	WARN_ON(!lockdep_sock_is_held(sk));
+	memset(opt, 0, sizeof(*opt));
+	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	if (!info)
+		return -EINVAL;
+	opt->local_send_id = info->local_send_id;
+	opt->send_rnextkeyid = info->send_rnextkeyid;
+	opt->recv_keyid = info->recv_keyid;
+	opt->recv_rnextkeyid = info->recv_rnextkeyid;
+
+	return 0;
+}
+
 static void tcp_authopt_key_del(struct sock *sk, struct tcp_authopt_key_info *key)
 {
 	hlist_del_rcu(&key->node);
