@@ -279,10 +279,11 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	struct tcp_authopt_alg *alg;
 	int err;
 
-	if (optlen < sizeof(opt))
+	/* If userspace optlen is too short fill the rest with zeros */
+	if (optlen > sizeof(opt))
 		return -EINVAL;
-
-	if (copy_from_sockptr(&opt, optval, sizeof(opt)))
+	memset(&opt, 0, sizeof(opt));
+	if (copy_from_sockptr(&opt, optval, optlen))
 		return -EFAULT;
 
 	if (opt.keylen > TCP_AUTHOPT_MAXKEYLEN)
