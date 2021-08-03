@@ -350,12 +350,31 @@ struct tcp_diag_md5sig {
 #define TCP_AUTHOPT_ALG_HMAC_SHA_1_96		1
 #define TCP_AUTHOPT_ALG_AES_128_CMAC_96		2
 
+#define TCP_AUTHOPT_FLAG_LOCK_KEYID			BIT(0)
+#define TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID	BIT(1)
+
+/* Configre behavior of segments with TCP-AO but that do not match an key.
+ * The default recommended by RFC is to silently accept such connections.
+ */
+#define TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED	BIT(2)
+
 /* Per-socket options */
 struct tcp_authopt {
-	/* No flags currently defined */
+	/* Mask of TCP_AUTHOPT_FLAG_* values */
 	__u32	flags;
-	/* local_id of preferred output key */
+	/* local_id of preferred send key
+	 * Unless TCP_AUTHOPT_FLAG_LOCK_KEYID is set this changes based on remote rnextkeyid
+	 */
 	__u32	local_send_id;
+	/* The rnextkeyid to send in packets
+	 * This is controlled by the user iff TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID
+	 * Otherwise rnextkeyid is the recv_id of the current key
+	 */
+	__u8	send_rnextkeyid;
+	/* A recently-received keyid value. Only for getsockopt */
+	__u8	recv_keyid;
+	/* A recently-received rnextkeyid value. Only for getsockopt */
+	__u8	recv_rnextkeyid;
 };
 
 /* Delete the key by local_id and ignore all fields */
