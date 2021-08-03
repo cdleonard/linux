@@ -890,32 +890,84 @@ int tcp_authopt_hash(char *hash_location,
 }
 
 static struct tcp_authopt_key_info *tcp_authopt_inbound_key_lookup(struct sock *sk,
+								   struct sk_buff *skb,
 								   struct tcp_authopt_info *info,
-								   u8 recv_id)
+								   int recv_id)
 {
+	struct tcp_authopt_key_info *result = NULL;
 	struct tcp_authopt_key_info *key;
 
 	/* multiple matches will cause occasional failures */
-	hlist_for_each_entry_rcu(key, &info->head, node, 0)
-		if (key->recv_id == recv_id)
-			return key;
+	hlist_for_each_entry_rcu(key, &info->head, node, 0) {
+		if (recv_id >= 0 && key->recv_id != recv_id)
+			continue;
+		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
+			if (sk->sk_family == AF_INET) {
+				struct sockaddr_in *key_addr = (struct sockaddr_in*)&key->addr;
+				struct iphdr *iph = (struct iphdr *)skb_network_header(skb);
+				if (WARN_ON(key_addr->sin_family != AF_INET))
+					continue;
+				if (WARN_ON(iph->version != 4))
+					continue;
+				if (memcmp(&iph->saddr, &key_addr->sin_addr, sizeof(iph->saddr)))
+					continue;
+			}
+			if (sk->sk_family == AF_INET6) {
+				struct sockaddr_in6 *key_addr = (struct sockaddr_in6*)&key->addr;
+				struct ipv6hdr *iph = (struct ipv6hdr *)skb_network_header(skb);
+				if (WARN_ON(key_addr->sin6_family != AF_INET6))
+					continue;
+				if (WARN_ON(iph->version != 6))
+					continue;
+				if (memcmp(&iph->saddr, &key_addr->sin6_addr, sizeof(iph->saddr)))
+					continue;
+			}
+		}
+		if (result && net_ratelimit()) {
+			pr_warn("ambiguous tcp authentication keys configured for receive\n");
+		}
+		result = key;
+	}
 
-	return NULL;
+	return result;
 }
 
 int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp_authopt_info *info)
 {
 	struct tcphdr *th = (struct tcphdr *)skb_transport_header(skb);
-	struct tcphdr_authopt *opt = (struct tcphdr_authopt *)tcp_authopt_find_option(th);
+	struct tcphdr_authopt *opt;
 	struct tcp_authopt_key_info *key;
 	u8 macbuf[16];
 	int err;
 
-	/* wrong, should reject if missing key: */
-	if (!opt)
-		return 0;
+	opt = (struct tcphdr_authopt *)tcp_authopt_find_option(th);
+	key = tcp_authopt_inbound_key_lookup(sk, skb, info, opt ? opt->keyid : -1);
 
-	key = tcp_authopt_inbound_key_lookup(sk, info, opt->keyid);
+	/* nothing found or expected */
+	if (!opt && !key)
+		return 0;
+	if (!opt && key) {
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
+		net_info_ratelimited("TCP Authentication Missing\n");
+		return -EINVAL;
+	}
+	if (opt && !key) {
+		/* RFC5925 Section 7.3:
+		 * A TCP-AO implementation MUST allow for configuration of the behavior
+		 * of segments with TCP-AO but that do not match an MKT. The initial
+		 * default of this configuration SHOULD be to silently accept such
+		 * connections.
+		 */
+		if (info->flags & TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED) {
+			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
+			net_info_ratelimited("TCP Authentication Unexpected: Rejected\n");
+			return -EINVAL;
+		} else {
+			net_info_ratelimited("TCP Authentication Unexpected: Accepted\n");
+			return 0;
+		}
+	}
+
 	/* bad inbound key len */
 	if (key->maclen + 4 != opt->len)
 		return -EINVAL;
