@@ -362,12 +362,14 @@ struct tcp_authopt {
 #define TCP_AUTHOPT_KEY_DEL		(1 << 0)
 /* Exclude TCP options from signature */
 #define TCP_AUTHOPT_KEY_EXCLUDE_OPTS	(1 << 1)
+/* Bind key to address */
+#define TCP_AUTHOPT_KEY_ADDR_BIND	(1 << 2)
 
 /* Per-key options
  * Each key is identified by a non-zero local_id which is managed by the application.
  */
 struct tcp_authopt_key {
-	/* Mix of TCP_AUTHOPT_KEY_ flags */
+	/* Mask of TCP_AUTHOPT_KEY_ flags */
 	__u32	flags;
 	/* Local identifier */
 	__u32	local_id;
@@ -380,6 +382,8 @@ struct tcp_authopt_key {
 	/* Length of the key buffer */
 	__u8	keylen;
 	__u8	key[TCP_AUTHOPT_MAXKEYLEN];
+	/* If specified key only valid for this address */
+	struct __kernel_sockaddr_storage addr;
 };
 
 /* setsockopt(fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE, ...) */

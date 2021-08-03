@@ -277,6 +277,12 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 		return 0;
 	}
 
+	/* check key family */
+	if (opt.flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
+		if (sk->sk_family != opt.addr.ss_family)
+			return -EINVAL;
+	}
+
 	/* check the algorithm */
 	alg = tcp_authopt_alg_get(opt.alg);
 	if (!alg)
@@ -296,7 +302,7 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 		return -ENOMEM;
 	}
 	key_info->local_id = opt.local_id;
-	key_info->flags = opt.flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS;
+	key_info->flags = opt.flags & (TCP_AUTHOPT_KEY_EXCLUDE_OPTS | TCP_AUTHOPT_KEY_ADDR_BIND);
 	key_info->send_id = opt.send_id;
 	key_info->recv_id = opt.recv_id;
 	key_info->alg_id = opt.alg;
@@ -305,6 +311,7 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	memcpy(key_info->key, opt.key, opt.keylen);
 	key_info->maclen = alg->maclen;
 	key_info->traffic_key_len = alg->traffic_key_len;
+	memcpy(&key_info->addr, &opt.addr, sizeof(key_info->addr));
 	hlist_add_head_rcu(&key_info->node, &info->head);
 
 	return 0;

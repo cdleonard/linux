@@ -20,6 +20,7 @@ struct tcp_authopt_key_info {
 	u8 maclen;
 	u8 traffic_key_len;
 	struct rcu_head rcu;
+	struct sockaddr_storage addr;
 	struct tcp_authopt_alg *alg;
 };
 
