@@ -938,7 +938,7 @@ int tcp_authopt_hash(char *hash_location,
 	return 0;
 }
 
-static struct tcp_authopt_key_info *tcp_authopt_inbound_key_lookup(struct sock *sk,
+static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 								   struct sk_buff *skb,
 								   struct tcp_authopt_info *info,
 								   int recv_id)
@@ -990,7 +990,7 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	int err;
 
 	opt = (struct tcphdr_authopt *)tcp_authopt_find_option(th);
-	key = tcp_authopt_inbound_key_lookup(sk, skb, info, opt ? opt->keyid : -1);
+	key = tcp_authopt_lookup_recv(sk, skb, info, opt ? opt->keyid : -1);
 
 	/* nothing found or expected */
 	if (!opt && !key)
