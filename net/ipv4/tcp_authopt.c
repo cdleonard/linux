@@ -170,18 +170,50 @@ struct tcp_authopt_key_info *__tcp_authopt_key_info_lookup(struct sock *sk,
 	return NULL;
 }
 
-struct tcp_authopt_key_info *tcp_authopt_key_info_lookup(struct sock *sk)
+/* Lookup key for sending */
+struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct sock *sk)
 {
+	struct tcp_authopt_key_info *result = NULL;
+	struct tcp_authopt_key_info *key;
 	struct tcp_authopt_info *info;
 
-	info = rcu_dereference_check(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
+	info = rcu_dereference(tcp_sk(sk)->authopt_info);
 	if (!info)
 		return NULL;
 
-	if (!info->local_send_id)
-		return NULL;
+	/* Explicitly selected from userspace */
+	if (info->local_send_id) {
+		key = __tcp_authopt_key_info_lookup(sk, info, info->local_send_id);
+		if (key)
+			return key;
+	}
 
-	return __tcp_authopt_key_info_lookup(sk, info, info->local_send_id);
+	hlist_for_each_entry_rcu(key, &info->head, node, 0) {
+		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
+			if (sk->sk_family == AF_INET) {
+				struct sockaddr_in *key_addr = (struct sockaddr_in*)&key->addr;
+				struct in_addr *daddr = (struct in_addr*)&sk->sk_daddr;
+				if (WARN_ON(key_addr->sin_family != AF_INET))
+					continue;
+				if (memcmp(daddr, &key_addr->sin_addr, sizeof(*daddr)))
+					continue;
+			}
+			if (sk->sk_family == AF_INET6) {
+				struct sockaddr_in6 *key_addr = (struct sockaddr_in6*)&key->addr;
+				struct in6_addr *daddr = &sk->sk_v6_daddr;
+				if (WARN_ON(key_addr->sin6_family != AF_INET6))
+					continue;
+				if (memcmp(daddr, &key_addr->sin6_addr, sizeof(*daddr)))
+					continue;
+			}
+		}
+		if (result && net_ratelimit()) {
+			pr_warn("ambiguous tcp authentication keys configured for receive\n");
+		}
+		result = key;
+	}
+
+	return result;
 }
 
 static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk)
