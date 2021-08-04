@@ -779,7 +779,7 @@ static int tcp_authopt_init_options(const struct sock *sk,
 #ifdef CONFIG_TCP_AUTHOPT
 	struct tcp_authopt_key_info *key;
 
-	key = tcp_authopt_key_info_lookup((struct sock*)sk);
+	key = tcp_authopt_lookup_send((struct sock*)sk);
 	if (key) {
 		opts->options |= OPTION_AUTHOPT;
 		opts->authopt_key = key;
