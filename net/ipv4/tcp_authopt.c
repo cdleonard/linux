@@ -184,9 +184,28 @@ struct tcp_authopt_key_info *tcp_authopt_key_info_lookup(struct sock *sk)
 	return __tcp_authopt_key_info_lookup(sk, info, info->local_send_id);
 }
 
-int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
+static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_authopt_info *info;
+
+	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	if (info)
+		return info;
+
+	info = kmalloc(sizeof(*info), GFP_KERNEL | __GFP_ZERO);
+	if (!info)
+		return ERR_PTR(-ENOMEM);
+
+	sk_nocaps_add(sk, NETIF_F_GSO_MASK);
+	INIT_HLIST_HEAD(&info->head);
+	rcu_assign_pointer(tp->authopt_info, info);
+
+	return info;
+}
+
+int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
+{
 	struct tcp_authopt opt;
 	struct tcp_authopt_info *info;
 
@@ -199,16 +218,10 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	if (copy_from_sockptr(&opt, optval, optlen))
 		return -EFAULT;
 
-	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
-	if (!info) {
-		info = kmalloc(sizeof(*info), GFP_KERNEL | __GFP_ZERO);
-		if (!info)
-			return -ENOMEM;
+	info = __tcp_authopt_info_get_or_create(sk);
+	if (IS_ERR(info))
+		return PTR_ERR(info);
 
-		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
-		INIT_HLIST_HEAD(&info->head);
-		rcu_assign_pointer(tp->authopt_info, info);
-	}
 	info->flags = opt.flags & (
 			TCP_AUTHOPT_FLAG_LOCK_KEYID |
 			TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID |
@@ -292,18 +305,22 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	if (opt.local_id == 0)
 		return -EINVAL;
 
-	/* must set authopt before setting keys */
-	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
-	if (!info)
-		return -EINVAL;
-
+	/* Delete is a special case: we ignore all fields other than local_id */
 	if (opt.flags & TCP_AUTHOPT_KEY_DEL) {
+		info = rcu_dereference_check(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
+		if (!info)
+			return -ENOENT;
 		key_info = __tcp_authopt_key_info_lookup(sk, info, opt.local_id);
 		if (!key_info)
 			return -ENOENT;
 		tcp_authopt_key_del(sk, key_info);
 		return 0;
 	}
+
+	/* Initialize tcp_authopt_info if not already set */
+	info = __tcp_authopt_info_get_or_create(sk);
+	if (IS_ERR(info))
+		return PTR_ERR(info);
 
 	/* check key family */
 	if (opt.flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
