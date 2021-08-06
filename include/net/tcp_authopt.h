@@ -39,7 +39,7 @@ struct tcp_authopt_info {
 };
 
 #ifdef CONFIG_TCP_AUTHOPT
-struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct sock *sk);
+struct tcp_authopt_key_info *tcp_authopt_lookup_send(const struct sock *sk, const struct sock *addr_sk);
 void tcp_authopt_clear(struct sock *sk);
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
 int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key);
@@ -73,7 +73,7 @@ static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb
 		return 0;
 }
 #else
-static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct sock *sk)
+static struct tcp_authopt_key_info *tcp_authopt_lookup_send(const struct sock *sk, const struct sock *addr_sk);
 {
 	return NULL;
 }

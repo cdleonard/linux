@@ -157,7 +157,7 @@ static void tcp_authopt_put_mac_shash(struct tcp_authopt_key_info *key,
 	return tcp_authopt_alg_put_tfm(key->alg, tfm);
 }
 
-struct tcp_authopt_key_info *__tcp_authopt_key_info_lookup(struct sock *sk,
+struct tcp_authopt_key_info *__tcp_authopt_key_info_lookup(const struct sock *sk,
 							   struct tcp_authopt_info *info,
 							   int key_id)
 {
@@ -170,8 +170,11 @@ struct tcp_authopt_key_info *__tcp_authopt_key_info_lookup(struct sock *sk,
 	return NULL;
 }
 
-/* Lookup key for sending */
-struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct sock *sk)
+/* Lookup key for sending
+ * addr_sk is the sock used for comparing daddr, it is only different from sk
+ * in the synack case.
+ */
+struct tcp_authopt_key_info *tcp_authopt_lookup_send(const struct sock *sk, const struct sock *addr_sk)
 {
 	struct tcp_authopt_key_info *result = NULL;
 	struct tcp_authopt_key_info *key;
@@ -190,17 +193,17 @@ struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct sock *sk)
 
 	hlist_for_each_entry_rcu(key, &info->head, node, 0) {
 		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
-			if (sk->sk_family == AF_INET) {
+			if (addr_sk->sk_family == AF_INET) {
 				struct sockaddr_in *key_addr = (struct sockaddr_in*)&key->addr;
-				struct in_addr *daddr = (struct in_addr*)&sk->sk_daddr;
+				const struct in_addr *daddr = (const struct in_addr*)&addr_sk->sk_daddr;
 				if (WARN_ON(key_addr->sin_family != AF_INET))
 					continue;
 				if (memcmp(daddr, &key_addr->sin_addr, sizeof(*daddr)))
 					continue;
 			}
-			if (sk->sk_family == AF_INET6) {
+			if (addr_sk->sk_family == AF_INET6) {
 				struct sockaddr_in6 *key_addr = (struct sockaddr_in6*)&key->addr;
-				struct in6_addr *daddr = &sk->sk_v6_daddr;
+				const struct in6_addr *daddr = &addr_sk->sk_v6_daddr;
 				if (WARN_ON(key_addr->sin6_family != AF_INET6))
 					continue;
 				if (memcmp(daddr, &key_addr->sin6_addr, sizeof(*daddr)))
