@@ -28,6 +28,10 @@ struct tcp_authopt_key_info {
 struct tcp_authopt_info {
 	/* List of tcp_authopt_key_info */
 	struct hlist_head head;
+	/* Current send_key, cached.
+	 * Once a key is found it only changes by user or remote request.
+	 */
+	struct tcp_authopt_key_info *send_key;
 	u32 flags;
 	u32 local_send_id;
 	u8 send_rnextkeyid;
@@ -39,7 +43,7 @@ struct tcp_authopt_info {
 };
 
 #ifdef CONFIG_TCP_AUTHOPT
-struct tcp_authopt_key_info *tcp_authopt_lookup_send(const struct sock *sk, const struct sock *addr_sk);
+struct tcp_authopt_key_info *tcp_authopt_select_key(const struct sock *sk, const struct sock *addr_sk, u8 *rnextkeyid);
 void tcp_authopt_clear(struct sock *sk);
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
 int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key);
@@ -73,7 +77,7 @@ static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb
 		return 0;
 }
 #else
-static struct tcp_authopt_key_info *tcp_authopt_lookup_send(const struct sock *sk, const struct sock *addr_sk);
+static struct tcp_authopt_key_info *tcp_authopt_select_key(const struct sock *sk, const struct sock *addr_sk, u8 *rnextkeyid);
 {
 	return NULL;
 }

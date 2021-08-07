@@ -4235,7 +4235,9 @@ zerocopy_rcv_out:
 		if (get_user(len, optlen))
 			return -EFAULT;
 
+		lock_sock(sk);
 		tcp_get_authopt_val(sk, &info);
+		release_sock(sk);
 
 		len = min_t(unsigned int, len, sizeof(info));
 		if (put_user(len, optlen))
