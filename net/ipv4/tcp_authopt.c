@@ -170,28 +170,16 @@ struct tcp_authopt_key_info *__tcp_authopt_key_info_lookup(const struct sock *sk
 	return NULL;
 }
 
-/* Lookup key for sending
- * addr_sk is the sock used for comparing daddr, it is only different from sk
- * in the synack case.
- */
-struct tcp_authopt_key_info *tcp_authopt_lookup_send(const struct sock *sk, const struct sock *addr_sk)
+struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct tcp_authopt_info *info,
+						     const struct sock *addr_sk,
+						     int send_id)
 {
 	struct tcp_authopt_key_info *result = NULL;
 	struct tcp_authopt_key_info *key;
-	struct tcp_authopt_info *info;
-
-	info = rcu_dereference(tcp_sk(sk)->authopt_info);
-	if (!info)
-		return NULL;
-
-	/* Explicitly selected from userspace */
-	if (info->local_send_id) {
-		key = __tcp_authopt_key_info_lookup(sk, info, info->local_send_id);
-		if (key)
-			return key;
-	}
 
 	hlist_for_each_entry_rcu(key, &info->head, node, 0) {
+		if (send_id >= 0 && key->send_id != send_id)
+			continue;
 		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
 			if (addr_sk->sk_family == AF_INET) {
 				struct sockaddr_in *key_addr = (struct sockaddr_in*)&key->addr;
@@ -217,6 +205,49 @@ struct tcp_authopt_key_info *tcp_authopt_lookup_send(const struct sock *sk, cons
 	}
 
 	return result;
+}
+
+/* Select key for sending
+ * addr_sk is the sock used for comparing daddr, it is only different from sk in
+ * the synack case.
+ */
+struct tcp_authopt_key_info *tcp_authopt_select_key(const struct sock *sk,
+						    const struct sock *addr_sk,
+						    u8 *rnextkeyid)
+{
+	struct tcp_authopt_key_info *key, *new_key;
+	struct tcp_authopt_info *info;
+
+	info = rcu_dereference(tcp_sk(sk)->authopt_info);
+	if (!info)
+		return NULL;
+
+	key = info->send_key;
+	if (info->flags & TCP_AUTHOPT_FLAG_LOCK_KEYID) {
+		int local_send_id = info->local_send_id;
+		if (local_send_id && (key == NULL || key->local_id != local_send_id))
+			new_key = __tcp_authopt_key_info_lookup(sk, info, local_send_id);
+	} else {
+		if (key == NULL || key->send_id != info->recv_rnextkeyid)
+			new_key = tcp_authopt_lookup_send(info, addr_sk, info->recv_rnextkeyid);
+	}
+	if (key == NULL && new_key == NULL)
+		new_key = tcp_authopt_lookup_send(info, addr_sk, -1);
+
+	// Change current key.
+	if (key != new_key && new_key) {
+		key = new_key;
+		info->send_key = key;
+	}
+
+	if (key) {
+		if (info->flags & TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID)
+			*rnextkeyid = info->send_rnextkeyid;
+		else
+			*rnextkeyid = info->send_rnextkeyid = key->recv_id;
+	}
+
+	return key;
 }
 
 static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk)
@@ -279,7 +310,10 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
 		return -EINVAL;
-	opt->local_send_id = info->local_send_id;
+	if (info->send_key)
+		opt->local_send_id = info->send_key->local_id;
+	else
+		opt->local_send_id = 0;
 	opt->send_rnextkeyid = info->send_rnextkeyid;
 	opt->recv_keyid = info->recv_keyid;
 	opt->recv_rnextkeyid = info->recv_rnextkeyid;
@@ -287,9 +321,11 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	return 0;
 }
 
-static void tcp_authopt_key_del(struct sock *sk, struct tcp_authopt_key_info *key)
+static void tcp_authopt_key_del(struct sock *sk, struct tcp_authopt_info *info, struct tcp_authopt_key_info *key)
 {
 	hlist_del_rcu(&key->node);
+	if (info->send_key == key)
+		info->send_key = NULL;
 	atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
 	// This might need to go into a real RCU callback
 	tcp_authopt_alg_release(key->alg);
@@ -303,7 +339,7 @@ void __tcp_authopt_info_free(struct sock *sk, struct tcp_authopt_info *info)
 	struct tcp_authopt_key_info *key;
 
 	hlist_for_each_entry_safe(key, n, &info->head, node)
-		tcp_authopt_key_del(sk, key);
+		tcp_authopt_key_del(sk, info, key);
 	kfree_rcu(info, rcu);
 }
 
@@ -348,7 +384,7 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 		key_info = __tcp_authopt_key_info_lookup(sk, info, opt.local_id);
 		if (!key_info)
 			return -ENOENT;
-		tcp_authopt_key_del(sk, key_info);
+		tcp_authopt_key_del(sk, info, key_info);
 		return 0;
 	}
 
@@ -375,7 +411,7 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	/* If an old value exists for same local_id it is deleted */
 	key_info = __tcp_authopt_key_info_lookup(sk, info, opt.local_id);
 	if (key_info)
-		tcp_authopt_key_del(sk, key_info);
+		tcp_authopt_key_del(sk, info, key_info);
 	key_info = sock_kmalloc(sk, sizeof(*key_info), GFP_KERNEL | __GFP_ZERO);
 	if (!key_info) {
 		tcp_authopt_alg_release(alg);
@@ -1016,7 +1052,7 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 			return -EINVAL;
 		} else {
 			net_info_ratelimited("TCP Authentication Unexpected: Accepted\n");
-			return 0;
+			goto accept;
 		}
 	}
 
@@ -1033,6 +1069,13 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		net_info_ratelimited("TCP Authentication Failed\n");
 		return -EINVAL;
 	}
+
+accept:
+	/* Doing this for all valid packets will results in keyids temporarily
+	 * flipping back and forth if packets are reordered or retransmitted.
+	 */
+	info->recv_keyid = opt->keyid;
+	info->recv_rnextkeyid = opt->rnextkeyid;
 
 	return 0;
 }

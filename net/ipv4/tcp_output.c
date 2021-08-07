@@ -440,6 +440,9 @@ struct tcp_out_options {
 	u8 ws;			/* window scale, 0 to disable */
 	u8 num_sack_blocks;	/* number of SACK blocks to include */
 	u8 bpf_opt_len;		/* length of BPF hdr option */
+#ifdef CONFIG_TCP_AUTHOPT
+	u8 authopt_rnextkeyid; /* rnextkey */
+#endif
 	__u8 *hash_location;	/* temporary pointer, overloaded */
 	__u32 tsval, tsecr;	/* need to include OPTION_TS */
 	struct tcp_fastopen_cookie *fastopen_cookie;	/* Fast open cookie */
@@ -626,11 +629,10 @@ static void tcp_options_write(__be32 *ptr, struct tcp_sock *tp,
 #ifdef CONFIG_TCP_AUTHOPT
 	if (unlikely(OPTION_AUTHOPT & options)) {
 		struct tcp_authopt_key_info *key = opts->authopt_key;
-		u8 rnextkeyid = 0;
 
 		WARN_ON(!key);
 		*ptr++ = htonl((TCPOPT_AUTHOPT << 24) | ((4 + key->maclen) << 16) |
-			       (key->send_id << 8) | rnextkeyid);
+			       (key->send_id << 8) | opts->authopt_rnextkeyid);
 		/* overload cookie hash location */
 		opts->hash_location = (__u8 *)ptr;
 		/* maclen is currently always 12 but try to align nicely anyway. */
@@ -780,7 +782,7 @@ static int tcp_authopt_init_options(const struct sock *sk,
 #ifdef CONFIG_TCP_AUTHOPT
 	struct tcp_authopt_key_info *key;
 
-	key = tcp_authopt_lookup_send(sk, addr_sk);
+	key = tcp_authopt_select_key(sk, addr_sk, &opts->authopt_rnextkeyid);
 	if (key) {
 		opts->options |= OPTION_AUTHOPT;
 		opts->authopt_key = key;
