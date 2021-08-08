@@ -106,6 +106,7 @@ Contents:
    tc-actions-env-rules
    tc-queue-filters
    tcp-thin
+   tcp_authopt
    team
    timestamping
    tipc
