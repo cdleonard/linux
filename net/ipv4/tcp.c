@@ -4471,10 +4471,11 @@ int tcp_md5_hash_key(struct tcp_md5sig_pool *hp, const struct tcp_md5sig_key *ke
 EXPORT_SYMBOL(tcp_md5_hash_key);
 
 /* Called with rcu_read_lock() */
-enum skb_drop_reason
+static enum skb_drop_reason
 tcp_inbound_md5_hash(const struct sock *sk, const struct sk_buff *skb,
 		     const void *saddr, const void *daddr,
-		     int family, int dif, int sdif)
+		     int family, int dif, int sdif,
+		     const u8 *hash_location)
 {
 	/*
 	 * This gets called for each TCP segment that arrives
@@ -4484,7 +4485,6 @@ tcp_inbound_md5_hash(const struct sock *sk, const struct sk_buff *skb,
 	 * o MD5 hash and we're not expecting one.
 	 * o MD5 hash and its wrong.
 	 */
-	const __u8 *hash_location = NULL;
 	struct tcp_md5sig_key *hash_expected;
 	const struct tcphdr *th = tcp_hdr(skb);
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -4497,7 +4497,6 @@ tcp_inbound_md5_hash(const struct sock *sk, const struct sk_buff *skb,
 	l3index = sdif ? dif : 0;
 
 	hash_expected = tcp_md5_do_lookup(sk, l3index, saddr, family);
-	hash_location = tcp_parse_md5sig_option(th);
 
 	/* We've parsed the options - do we have a hash? */
 	if (!hash_expected && !hash_location)
@@ -4535,9 +4534,45 @@ tcp_inbound_md5_hash(const struct sock *sk, const struct sk_buff *skb,
 	}
 	return SKB_NOT_DROPPED_YET;
 }
-EXPORT_SYMBOL(tcp_inbound_md5_hash);
 
 #endif /* CONFIG_TCP_MD5SIG */
+
+#if defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT)
+
+enum skb_drop_reason
+tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
+		     const void *saddr, const void *daddr,
+		     int family, int dif, int sdif)
+{
+	/* FIXME: Restore reqsk handling */
+	const u8 *md5, *ao;
+	int ret;
+	const struct sock *parent_sk;
+
+	if (sk->sk_state == TCP_NEW_SYN_RECV)
+		parent_sk = inet_reqsk(sk)->rsk_listener;
+	else
+		parent_sk = sk;
+
+	ret = tcp_parse_sig_options(tcp_hdr(skb), &md5, &ao);
+	if (ret)
+		return SKB_DROP_REASON_NOT_SPECIFIED;
+	if (tcp_authopt_needed) {
+		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(parent_sk)->authopt_info);
+
+		if (info) {
+			ret = __tcp_authopt_inbound_check((struct sock *)sk, (struct sk_buff*)skb, info, ao);
+			if (ret < 0)
+				return SKB_DROP_REASON_NOT_SPECIFIED;
+		}
+	}
+	if (ret == 1)
+		return SKB_NOT_DROPPED_YET;
+	return tcp_inbound_md5_hash(parent_sk, skb, saddr, daddr, family, dif, sdif, md5);
+}
+EXPORT_SYMBOL(tcp_inbound_sig_hash);
+
+#endif /* defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT) */
 
 void tcp_done(struct sock *sk)
 {

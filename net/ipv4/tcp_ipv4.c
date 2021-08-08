@@ -1964,10 +1964,10 @@ process:
 		bool req_stolen = false;
 		struct sock *nsk;
 
-		sk = req->rsk_listener;
-		drop_reason = tcp_inbound_md5_hash(sk, skb,
+		drop_reason = tcp_inbound_sig_hash(sk, skb,
 						   &iph->saddr, &iph->daddr,
 						   AF_INET, dif, sdif);
+		sk = req->rsk_listener;
 		if (unlikely(drop_reason)) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
@@ -2042,7 +2042,7 @@ process:
 		goto discard_and_relse;
 	}
 
-	drop_reason = tcp_inbound_md5_hash(sk, skb, &iph->saddr,
+	drop_reason = tcp_inbound_sig_hash(sk, skb, &iph->saddr,
 					   &iph->daddr, AF_INET, dif, sdif);
 	if (drop_reason)
 		goto discard_and_relse;
