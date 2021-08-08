@@ -4,6 +4,8 @@
 
 #include <uapi/linux/tcp.h>
 
+struct tcp_authopt_alg_imp;
+
 /** struct tcp_authopt_key_info - Representation of a Master Key Tuple as per RFC5925
  *
  * Key structure lifetime is only protected by RCU so readers needs to hold a
@@ -21,6 +23,7 @@ struct tcp_authopt_key_info {
 	u8 keylen;
 	u8 key[TCP_AUTHOPT_MAXKEYLEN];
 	struct sockaddr_storage addr;
+	struct tcp_authopt_alg_imp *alg;
 };
 
 /** struct tcp_authopt-info - Per-socket information regarding tcp_authopt
