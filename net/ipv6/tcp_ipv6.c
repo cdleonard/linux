@@ -42,6 +42,7 @@
 #include <linux/indirect_call_wrapper.h>
 
 #include <net/tcp.h>
+#include <net/tcp_authopt.h>
 #include <net/ndisc.h>
 #include <net/inet6_hashtables.h>
 #include <net/inet6_connection_sock.h>
@@ -1621,6 +1622,44 @@ static void tcp_v6_fill_cb(struct sk_buff *skb, const struct ipv6hdr *hdr,
 			skb->tstamp || skb_hwtstamps(skb)->hwtstamp;
 }
 
+static int tcp_v6_auth_inbound_check(struct sock *sk,
+				     struct sk_buff *skb,
+				     int dif,
+				     int sdif)
+{
+	int aoret;
+
+	aoret = tcp_authopt_inbound_check(sk, skb);
+	if (aoret < 0)
+		return aoret;
+	if (aoret > 0)
+		return 0;
+
+	return tcp_v6_inbound_md5_hash(sk, skb, dif, sdif);
+}
+
+static int tcp_v6_auth_inbound_check_req(struct request_sock *req,
+                                        struct sk_buff *skb,
+                                        int dif,
+                                        int sdif)
+{
+       struct sock *lsk = req->rsk_listener;
+       int aoret = 0;
+
+       if (tcp_authopt_needed) {
+               struct tcp_authopt_info *info = rcu_dereference(tcp_sk(lsk)->authopt_info);
+
+               if (info)
+                       aoret = __tcp_authopt_inbound_check((struct sock *)req, skb, info);
+       }
+       if (aoret < 0)
+               return aoret;
+       if (aoret > 0)
+               return 0;
+
+       return tcp_v6_inbound_md5_hash(lsk, skb, dif, sdif);
+}
+
 INDIRECT_CALLABLE_SCOPE int tcp_v6_rcv(struct sk_buff *skb)
 {
 	int sdif = inet6_sdif(skb);
@@ -1673,7 +1712,7 @@ process:
 		struct sock *nsk;
 
 		sk = req->rsk_listener;
-		if (tcp_v6_inbound_md5_hash(sk, skb, dif, sdif)) {
+		if (tcp_v6_auth_inbound_check_req(req, skb, dif, sdif)) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
 			goto discard_it;
@@ -1740,7 +1779,7 @@ process:
 	if (!xfrm6_policy_check(sk, XFRM_POLICY_IN, skb))
 		goto discard_and_relse;
 
-	if (tcp_v6_inbound_md5_hash(sk, skb, dif, sdif))
+	if (tcp_v6_auth_inbound_check(sk, skb, dif, sdif))
 		goto discard_and_relse;
 
 	if (tcp_filter(sk, skb))
