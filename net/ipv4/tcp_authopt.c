@@ -10,7 +10,7 @@
 #define TCP_AUTHOPT_MAXMACBUF	20
 #define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN	20
 
-struct tcp_authopt_alg {
+struct tcp_authopt_alg_imp {
 	/* Name of algorithm in crypto-api */
 	const char *alg_name;
 	/* One of the TCP_AUTHOPT_ALG_* constants from uapi */
@@ -26,7 +26,7 @@ struct tcp_authopt_alg {
 	struct crypto_shash *tfm;
 };
 
-static struct tcp_authopt_alg tcp_authopt_alg_list[] = {
+static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
 	{
 		.alg_id = TCP_AUTHOPT_ALG_HMAC_SHA_1_96,
 		.alg_name = "hmac(sha1)",
@@ -44,7 +44,7 @@ static struct tcp_authopt_alg tcp_authopt_alg_list[] = {
 };
 
 /* get a pointer to the tcp_authopt_alg instance or NULL if id invalid */
-static inline struct tcp_authopt_alg *tcp_authopt_alg_get(int alg_num)
+static inline struct tcp_authopt_alg_imp *tcp_authopt_alg_get(int alg_num)
 {
 	if (alg_num <= 0 || alg_num > 2)
 		return NULL;
@@ -52,7 +52,7 @@ static inline struct tcp_authopt_alg *tcp_authopt_alg_get(int alg_num)
 }
 
 /* Mark an algorithm as in-use from user context */
-static int tcp_authopt_alg_require(struct tcp_authopt_alg *alg)
+static int tcp_authopt_alg_require(struct tcp_authopt_alg_imp *alg)
 {
 	struct crypto_shash *tfm = NULL;
 	bool need_init = false;
@@ -94,7 +94,7 @@ static int tcp_authopt_alg_require(struct tcp_authopt_alg *alg)
 	return 0;
 }
 
-static void tcp_authopt_alg_release(struct tcp_authopt_alg *alg)
+static void tcp_authopt_alg_release(struct tcp_authopt_alg_imp *alg)
 {
 	struct crypto_shash *tfm_to_free = NULL;
 
@@ -114,7 +114,7 @@ static void tcp_authopt_alg_release(struct tcp_authopt_alg *alg)
 }
 
 /* increase reference count on an algorithm that is already in use */
-static void tcp_authopt_alg_incref(struct tcp_authopt_alg *alg)
+static void tcp_authopt_alg_incref(struct tcp_authopt_alg_imp *alg)
 {
 	spin_lock_bh(&alg->lock);
 	WARN_ON(alg->ref_cnt <= 0);
@@ -122,14 +122,14 @@ static void tcp_authopt_alg_incref(struct tcp_authopt_alg *alg)
 	spin_unlock_bh(&alg->lock);
 }
 
-static struct crypto_shash *tcp_authopt_alg_get_tfm(struct tcp_authopt_alg *alg)
+static struct crypto_shash *tcp_authopt_alg_get_tfm(struct tcp_authopt_alg_imp *alg)
 {
 	spin_lock_bh(&alg->lock);
 	WARN_ON(alg->ref_cnt < 0);
 	return alg->tfm;
 }
 
-static void tcp_authopt_alg_put_tfm(struct tcp_authopt_alg *alg, struct crypto_shash *tfm)
+static void tcp_authopt_alg_put_tfm(struct tcp_authopt_alg_imp *alg, struct crypto_shash *tfm)
 {
 	WARN_ON(tfm != alg->tfm);
 	spin_unlock_bh(&alg->lock);
@@ -360,7 +360,7 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	struct tcp_authopt_key opt;
 	struct tcp_authopt_info *info;
 	struct tcp_authopt_key_info *key_info;
-	struct tcp_authopt_alg *alg;
+	struct tcp_authopt_alg_imp *alg;
 	int err;
 
 	/* If userspace optlen is too short fill the rest with zeros */
@@ -1035,7 +1035,6 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	if (!opt && !key)
 		return 0;
 	if (!opt && key) {
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		net_info_ratelimited("TCP Authentication Missing\n");
 		return -EINVAL;
 	}
@@ -1047,7 +1046,6 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		 * connections.
 		 */
 		if (info->flags & TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED) {
-			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 			net_info_ratelimited("TCP Authentication Unexpected: Rejected\n");
 			return -EINVAL;
 		} else {
@@ -1065,7 +1063,6 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		return err;
 
 	if (memcmp(macbuf, opt->mac, key->maclen)) {
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		net_info_ratelimited("TCP Authentication Failed\n");
 		return -EINVAL;
 	}
