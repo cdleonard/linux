@@ -347,61 +347,102 @@ struct tcp_diag_md5sig {
 /* for TCP_AUTHOPT socket option */
 #define TCP_AUTHOPT_MAXKEYLEN	80
 
+/*
+ */
+
 #define TCP_AUTHOPT_ALG_HMAC_SHA_1_96		1
 #define TCP_AUTHOPT_ALG_AES_128_CMAC_96		2
 
-#define TCP_AUTHOPT_FLAG_LOCK_KEYID			BIT(0)
-#define TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID	BIT(1)
-
-/* Configre behavior of segments with TCP-AO but that do not match an key.
- * The default recommended by RFC is to silently accept such connections.
+/**
+ * enum tcp_authopt_flag - flags for `tcp_authopt.flags`
  */
-#define TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED	BIT(2)
+enum tcp_authopt_flag {
+	/**
+	 * @TCP_AUTHOPT_FLAG_LOCK_KEYID: keyid controlled by sockopt
+	 *
+	 * If this is set `tcp_authopt.local_send_id` is used to determined sending
+	 * key. Otherwise a key with send_id == recv_rnextkeyid is preferred.
+	 */
+	TCP_AUTHOPT_FLAG_LOCK_KEYID = BIT(0),
+	/**
+	 * @TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID: Override rnextkeyid from userspace
+	 * 
+	 * If this is set then `tcp_authopt.send_rnextkeyid` is sent on outbound
+	 * packets. Other the recv_id of the current sending key is sent.
+	 */
+	TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID = BIT(1),
+	/**
+	 * @TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED:
+	 *	Configure behavior of segments with TCP-AO coming from hosts for which no
+	 *	key is configured. The default recommended by RFC is to silently accept
+	 *	such connections.
+	 */
+	TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED = BIT(2),
+};
 
-/* Per-socket options */
+/**
+ * struct tcp_authopt - Per-socket options related to TCP Authentication Option
+ */
 struct tcp_authopt {
-	/* Mask of TCP_AUTHOPT_FLAG_* values */
+	/** @flags: Combination of &enum tcp_authopt_flag */
 	__u32	flags;
-	/* local_id of preferred send key
-	 * Unless TCP_AUTHOPT_FLAG_LOCK_KEYID is set this changes based on remote rnextkeyid
+	/**
+	 * @local_send_id: `tcp_authopt_key.local_id` of preferred send key
+	 *
+	 * This is only used if `TCP_AUTHOPT_FLAG_LOCK_KEYID` is set
 	 */
 	__u32	local_send_id;
-	/* The rnextkeyid to send in packets
-	 * This is controlled by the user iff TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID
-	 * Otherwise rnextkeyid is the recv_id of the current key
+	/**
+	 * @send_rnextkeyid: The rnextkeyid to send in packets
+	 *
+	 * This is controlled by the user iff TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID is
+	 * set. Otherwise rnextkeyid is the recv_id of the current key
 	 */
 	__u8	send_rnextkeyid;
-	/* A recently-received keyid value. Only for getsockopt */
+	/** @recv_keyid: A recently-received keyid value. Only for getsockopt. */
 	__u8	recv_keyid;
-	/* A recently-received rnextkeyid value. Only for getsockopt */
+	/** @recv_rnextkeyid: A recently-received rnextkeyid value. Only for getsockopt. */
 	__u8	recv_rnextkeyid;
 };
 
-/* Delete the key by local_id and ignore all fields */
-#define TCP_AUTHOPT_KEY_DEL		(1 << 0)
-/* Exclude TCP options from signature */
-#define TCP_AUTHOPT_KEY_EXCLUDE_OPTS	(1 << 1)
-/* Bind key to address */
-#define TCP_AUTHOPT_KEY_ADDR_BIND	(1 << 2)
+/**
+ * enum tcp_authopt_key_flag - flags for `tcp_authopt.flags`
+ *
+ * @TCP_AUTHOPT_KEY_DEL: Delete the key by local_id and ignore all other fields.
+ * @TCP_AUTHOPT_KEY_EXCLUDE_OPTS: Exclude TCP options from signature.
+ * @TCP_AUTHOPT_KEY_ADDR_BIND: Key only valid for `tcp_authopt.addr`
+ */
+enum tcp_authopt_key_flag {
+	TCP_AUTHOPT_KEY_DEL = BIT(0),
+	TCP_AUTHOPT_KEY_EXCLUDE_OPTS = BIT(1),
+	TCP_AUTHOPT_KEY_ADDR_BIND = BIT(2),
+};
 
-/* Per-key options
+/**
+ * struct tcp_authopt_key - TCP Authentication KEY
+ *
  * Each key is identified by a non-zero local_id which is managed by the application.
  */
 struct tcp_authopt_key {
-	/* Mask of TCP_AUTHOPT_KEY_ flags */
+	/** @flags: Combination of &enum tcp_authopt_key_flag */
 	__u32	flags;
-	/* Local identifier */
+	/** @local_id: Local identifier */
 	__u32	local_id;
-	/* SendID on the network */
+	/** @send_id: keyid value for send */
 	__u8	send_id;
-	/* RecvID on the network */
+	/** @recv_id: keyid value for receive */
 	__u8	recv_id;
-	/* One of the TCP_AUTHOPT_ALG_* constant */
+	/** @alg: One of the TCP_AUTHOPT_ALG_* constants */
 	__u8	alg;
-	/* Length of the key buffer */
+	/** @keylen: Length of the key buffer */
 	__u8	keylen;
+	/** @key: Secrete key */
 	__u8	key[TCP_AUTHOPT_MAXKEYLEN];
-	/* If specified key only valid for this address */
+	/**
+	 * @addr: Key is only valid for this address
+	 *
+	 * Ignored unless TCP_AUTHOPT_KEY_ADDR_BIND flag is set
+	 */
 	struct __kernel_sockaddr_storage addr;
 };
 
