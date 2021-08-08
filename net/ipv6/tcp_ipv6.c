@@ -42,6 +42,7 @@
 #include <linux/indirect_call_wrapper.h>
 
 #include <net/tcp.h>
+#include <net/tcp_authopt.h>
 #include <net/ndisc.h>
 #include <net/inet6_hashtables.h>
 #include <net/inet6_connection_sock.h>
@@ -1634,10 +1635,10 @@ process:
 		bool req_stolen = false;
 		struct sock *nsk;
 
-		sk = req->rsk_listener;
-		drop_reason = tcp_inbound_md5_hash(sk, skb,
+		drop_reason = tcp_inbound_sig_hash(sk, skb,
 						   &hdr->saddr, &hdr->daddr,
 						   AF_INET6, dif, sdif);
+		sk = req->rsk_listener;
 		if (drop_reason) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
@@ -1709,8 +1710,8 @@ process:
 		goto discard_and_relse;
 	}
 
-	drop_reason = tcp_inbound_md5_hash(sk, skb, &hdr->saddr, &hdr->daddr,
-					   AF_INET6, dif, sdif);
+	drop_reason = tcp_inbound_sig_hash(sk, skb, &hdr->saddr,
+					   &hdr->daddr, AF_INET6, dif, sdif);
 	if (drop_reason)
 		goto discard_and_relse;
 
