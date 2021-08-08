@@ -4604,6 +4604,21 @@ tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
 	if (ret)
 		return SKB_DROP_REASON_NOT_SPECIFIED;
 
+#if defined(CONFIG_TCP_AUTHOPT)
+	if (tcp_authopt_needed) {
+		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(parent_sk)->authopt_info);
+
+		if (info) {
+			ret = __tcp_authopt_inbound_check((struct sock *)sk,
+							  (struct sk_buff *)skb,
+							  info, ao);
+			if (ret < 0)
+				return SKB_DROP_REASON_NOT_SPECIFIED;
+		}
+	}
+	if (ret == 1)
+		return SKB_NOT_DROPPED_YET;
+#endif
 #ifdef CONFIG_TCP_MD5SIG
 	return tcp_inbound_md5_hash(parent_sk, skb, saddr, daddr, family, dif, sdif, md5);
 #else
