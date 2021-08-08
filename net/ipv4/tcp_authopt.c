@@ -426,7 +426,6 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	key_info->keylen = opt.keylen;
 	memcpy(key_info->key, opt.key, opt.keylen);
 	key_info->maclen = alg->maclen;
-	key_info->traffic_key_len = alg->traffic_key_len;
 	memcpy(&key_info->addr, &opt.addr, sizeof(key_info->addr));
 	hlist_add_head_rcu(&key_info->node, &info->head);
 
@@ -623,7 +622,7 @@ static int tcp_authopt_get_traffic_key(struct sock *sk,
 	kdf_tfm = tcp_authopt_get_kdf_shash(key);
 	if (IS_ERR(kdf_tfm))
 		return PTR_ERR(kdf_tfm);
-	if (WARN_ON(crypto_shash_digestsize(kdf_tfm) != key->traffic_key_len)) {
+	if (WARN_ON(crypto_shash_digestsize(kdf_tfm) != key->alg->traffic_key_len)) {
 		err = -EINVAL;
 		goto out;
 	}
@@ -921,7 +920,7 @@ int __tcp_authopt_calc_mac(struct sock *sk,
 
 	if (sk->sk_family != AF_INET && sk->sk_family != AF_INET6)
 		return -EINVAL;
-	if (WARN_ON(key->traffic_key_len > sizeof(traffic_key)))
+	if (WARN_ON(key->alg->traffic_key_len > sizeof(traffic_key)))
 		return -ENOBUFS;
 
 	err = tcp_authopt_get_traffic_key(sk, skb, key, input, ipv6, traffic_key);
@@ -935,7 +934,7 @@ int __tcp_authopt_calc_mac(struct sock *sk,
 		err = -EINVAL;
 		goto out;
 	}
-	err = crypto_shash_setkey(mac_tfm, traffic_key, key->traffic_key_len);
+	err = crypto_shash_setkey(mac_tfm, traffic_key, key->alg->traffic_key_len);
 	if (err)
 		goto out;
 

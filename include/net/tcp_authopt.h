@@ -18,7 +18,6 @@ struct tcp_authopt_key_info {
 	u8 keylen;
 	u8 key[TCP_AUTHOPT_MAXKEYLEN];
 	u8 maclen;
-	u8 traffic_key_len;
 	struct rcu_head rcu;
 	struct sockaddr_storage addr;
 	struct tcp_authopt_alg_imp *alg;
