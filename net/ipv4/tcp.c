@@ -4540,6 +4540,31 @@ EXPORT_SYMBOL(tcp_inbound_md5_hash);
 
 #endif /* CONFIG_TCP_MD5SIG */
 
+#ifdef /* defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT) */
+
+enum skb_drop_reason
+tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
+		     const void *saddr, const void *daddr,
+		     int family, int dif, int sdif)
+{
+	struct sock *lsk = req->rsk_listener;
+	const u8 *md5, *ao;
+	int ret;
+
+	ret = tcp_parse_sig_options(tcp_hdr(skb), &md5, &ao);
+	if (ret)
+		return SKB_DROP_REASON_NOT_SPECIFIED;
+	ret = tcp_authopt_inbound_check_req(req, skb, ao);
+	if (ret < 0)
+		return SKB_DROP_REASON_NOT_SPECIFIED;
+	if (ret == 1)
+		return SKB_NOT_DROPPED_YET;
+	return tcp_inbound_md5_hash(lsk, skb, dif, sdif, md5);
+}
+EXPORT_SYMBOL(tcp_inbound_md5_hash);
+
+#endif /* defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT) */
+
 void tcp_done(struct sock *sk)
 {
 	struct request_sock *req;
