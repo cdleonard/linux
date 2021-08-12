@@ -44,7 +44,7 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	struct tcp_authopt opt;
 	struct tcp_authopt_info *info;
 
-	WARN_ON(!lockdep_sock_is_held(sk));
+	sock_owned_by_me(sk);
 
 	/* If userspace optlen is too short fill the rest with zeros */
 	if (optlen > sizeof(opt))
@@ -67,7 +67,8 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tcp_authopt_info *info;
 
-	WARN_ON(!lockdep_sock_is_held(sk));
+	sock_owned_by_me(sk);
+
 	memset(opt, 0, sizeof(*opt));
 	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
@@ -115,6 +116,8 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	struct tcp_authopt_key opt;
 	struct tcp_authopt_info *info;
 	struct tcp_authopt_key_info *key_info;
+
+	sock_owned_by_me(sk);
 
 	/* If userspace optlen is too short fill the rest with zeros */
 	if (optlen > sizeof(opt))
