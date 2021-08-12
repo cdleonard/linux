@@ -416,16 +416,16 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 		return 0;
 	}
 
-	/* Initialize tcp_authopt_info if not already set */
-	info = __tcp_authopt_info_get_or_create(sk);
-	if (IS_ERR(info))
-		return PTR_ERR(info);
-
 	/* check key family */
 	if (opt.flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
 		if (sk->sk_family != opt.addr.ss_family)
 			return -EINVAL;
 	}
+
+	/* Initialize tcp_authopt_info if not already set */
+	info = __tcp_authopt_info_get_or_create(sk);
+	if (IS_ERR(info))
+		return PTR_ERR(info);
 
 	/* check the algorithm */
 	alg = tcp_authopt_alg_get(opt.alg);
