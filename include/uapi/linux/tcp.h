@@ -378,16 +378,16 @@ struct tcp_authopt {
 	/** @flags: Combination of &enum tcp_authopt_flag */
 	__u32	flags;
 	/**
-	 * @local_send_id: `tcp_authopt_key.local_id` of preferred send key
+	 * @send_keyid: `tcp_authopt_key.send_id` of preferred send key
 	 *
-	 * This is only used if `TCP_AUTHOPT_FLAG_LOCK_KEYID` is set
+	 * This is only used if `TCP_AUTHOPT_FLAG_LOCK_KEYID` is set.
 	 */
-	__u32	local_send_id;
+	__u8	send_keyid;
 	/**
 	 * @send_rnextkeyid: The rnextkeyid to send in packets
 	 *
 	 * This is controlled by the user iff TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID is
-	 * set. Otherwise rnextkeyid is the recv_id of the current key
+	 * set. Otherwise rnextkeyid is the recv_id of the current key.
 	 */
 	__u8	send_rnextkeyid;
 	/** @recv_keyid: A recently-received keyid value. Only for getsockopt. */
