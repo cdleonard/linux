@@ -6,7 +6,8 @@
 
 struct tcp_authopt_alg_imp;
 
-/** struct tcp_authopt_key_info - Representation of a Master Key Tuple as per RFC5925
+/**
+ * struct tcp_authopt_key_info - Representation of a Master Key Tuple as per RFC5925
  *
  * Key structure lifetime is only protected by RCU so readers needs to hold a
  * single rcu_read_lock until they're done with the key.
@@ -27,7 +28,8 @@ struct tcp_authopt_key_info {
 	struct tcp_authopt_alg_imp *alg;
 };
 
-/** struct tcp_authopt-info - Per-socket information regarding tcp_authopt
+/**
+ * struct tcp_authopt_info - Per-socket information regarding tcp_authopt
  *
  * This is lazy-initialized in order to avoid increasing memory usage for
  * regular TCP sockets. Once created it is only destroyed on socket close.
