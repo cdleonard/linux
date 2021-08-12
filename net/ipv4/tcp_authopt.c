@@ -287,14 +287,14 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	if (copy_from_sockptr(&opt, optval, optlen))
 		return -EFAULT;
 
+	if (opt.flags & ~TCP_AUTHOPT_KNOWN_FLAGS)
+		return -EINVAL;
+
 	info = __tcp_authopt_info_get_or_create(sk);
 	if (IS_ERR(info))
 		return PTR_ERR(info);
 
-	info->flags = opt.flags &
-		(TCP_AUTHOPT_FLAG_LOCK_KEYID |
-		TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID |
-		TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED);
+	info->flags = opt.flags & TCP_AUTHOPT_KNOWN_FLAGS;
 	info->local_send_id = opt.local_send_id;
 	if (opt.flags & TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID)
 		info->send_rnextkeyid = opt.send_rnextkeyid;
@@ -314,7 +314,7 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	if (!info)
 		return -EINVAL;
 
-	opt->flags = info->flags & TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED;
+	opt->flags = info->flags & TCP_AUTHOPT_KNOWN_FLAGS;
 	if (info->send_key)
 		opt->local_send_id = info->send_key->local_id;
 	else
@@ -368,6 +368,11 @@ void tcp_authopt_clear(struct sock *sk)
 	}
 }
 
+#define TCP_AUTHOPT_KEY_KNOWN_FLAGS ( \
+	TCP_AUTHOPT_KEY_DEL | \
+	TCP_AUTHOPT_KEY_EXCLUDE_OPTS | \
+	TCP_AUTHOPT_KEY_ADDR_BIND)
+
 int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 {
 	struct tcp_authopt_key opt;
@@ -384,6 +389,9 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	memset(&opt, 0, sizeof(opt));
 	if (copy_from_sockptr(&opt, optval, optlen))
 		return -EFAULT;
+
+	if (opt.flags & ~TCP_AUTHOPT_KEY_KNOWN_FLAGS)
+		return -EINVAL;
 
 	if (opt.keylen > TCP_AUTHOPT_MAXKEYLEN)
 		return -EINVAL;
