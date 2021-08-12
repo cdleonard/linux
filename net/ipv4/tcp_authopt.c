@@ -274,7 +274,7 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 }
 
 #define TCP_AUTHOPT_KNOWN_FLAGS ( \
-	TCP_AUTHOPT_FLAG_LOCK_KEYID \
+	TCP_AUTHOPT_FLAG_LOCK_KEYID | \
 	TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID | \
 	TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED)
 
