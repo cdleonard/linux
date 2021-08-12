@@ -209,9 +209,14 @@ struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct tcp_authopt_info *in
 	return result;
 }
 
-/* Select key for sending
+/**
+ * tcp_authopt_select_key - select key for sending
+ *
  * addr_sk is the sock used for comparing daddr, it is only different from sk in
  * the synack case.
+ *
+ * Result is protected by RCU and can't be stored, it may only be passed to
+ * tcp_authopt_hash and only under a single rcu_read_lock.
  */
 struct tcp_authopt_key_info *tcp_authopt_select_key(const struct sock *sk,
 						    const struct sock *addr_sk,
