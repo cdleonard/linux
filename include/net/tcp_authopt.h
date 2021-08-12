@@ -13,6 +13,7 @@ struct tcp_authopt_alg_imp;
  */
 struct tcp_authopt_key_info {
 	struct hlist_node node;
+	struct rcu_head rcu;
 	/* Local identifier */
 	u32 local_id;
 	u32 flags;
@@ -22,7 +23,6 @@ struct tcp_authopt_key_info {
 	u8 keylen;
 	u8 key[TCP_AUTHOPT_MAXKEYLEN];
 	u8 maclen;
-	struct rcu_head rcu;
 	struct sockaddr_storage addr;
 	struct tcp_authopt_alg_imp *alg;
 };
@@ -35,6 +35,7 @@ struct tcp_authopt_key_info {
 struct tcp_authopt_info {
 	/** @head: List of tcp_authopt_key_info */
 	struct hlist_head head;
+	struct rcu_head rcu;
 	/* Current send_key, cached.
 	 * Once a key is found it only changes by user or remote request.
 	 */
@@ -46,7 +47,6 @@ struct tcp_authopt_info {
 	u8 recv_rnextkeyid;
 	u32 src_isn;
 	u32 dst_isn;
-	struct rcu_head rcu;
 };
 
 #ifdef CONFIG_TCP_AUTHOPT
