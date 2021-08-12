@@ -157,15 +157,50 @@ static void tcp_authopt_put_mac_shash(struct tcp_authopt_key_info *key,
 	return tcp_authopt_alg_put_tfm(key->alg, tfm);
 }
 
-static struct tcp_authopt_key_info *__tcp_authopt_key_info_lookup(const struct sock *sk,
-								  struct tcp_authopt_info *info,
-								  int local_id)
+/* checks that ipv4 or ipv6 addr matches. */
+static bool ipvx_addr_match(struct sockaddr_storage *a1,
+			    struct sockaddr_storage *a2)
 {
-	struct tcp_authopt_key_info *key;
+	if (a1->ss_family != a2->ss_family)
+		return false;
+	if (a1->ss_family == AF_INET && memcmp(
+			&((struct sockaddr_in *)a1)->sin_addr,
+			&((struct sockaddr_in *)a2)->sin_addr,
+			sizeof(struct in_addr)))
+		return false;
+	if (a1->ss_family == AF_INET6 && memcmp(
+			&((struct sockaddr_in6 *)a1)->sin6_addr,
+			&((struct sockaddr_in6 *)a2)->sin6_addr,
+			sizeof(struct in6_addr)))
+		return false;
+	return true;
+}
 
-	hlist_for_each_entry_rcu(key, &info->head, node, lockdep_sock_is_held(sk))
-		if (key->local_id == local_id)
-			return key;
+static bool tcp_authopt_key_match_exact(struct tcp_authopt_key_info *info,
+					struct tcp_authopt_key *key)
+{
+	if (info->send_id != key->send_id)
+		return false;
+	if (info->recv_id != key->recv_id)
+		return false;
+	if ((info->flags & TCP_AUTHOPT_KEY_ADDR_BIND) != (key->recv_id & TCP_AUTHOPT_KEY_ADDR_BIND))
+		return false;
+	if (info->flags & TCP_AUTHOPT_KEY_ADDR_BIND)
+		if (!ipvx_addr_match(&info->addr, &key->addr))
+			return false;
+
+	return true;
+}
+
+static struct tcp_authopt_key_info *tcp_authopt_key_lookup_exact(const struct sock *sk,
+								 struct tcp_authopt_info *info,
+								 struct tcp_authopt_key *ukey)
+{
+	struct tcp_authopt_key_info *key_info;
+
+	hlist_for_each_entry_rcu(key_info, &info->head, node, lockdep_sock_is_held(sk))
+		if (tcp_authopt_key_match_exact(key_info, ukey))
+			return key_info;
 
 	return NULL;
 }
@@ -411,15 +446,12 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	if (opt.keylen > TCP_AUTHOPT_MAXKEYLEN)
 		return -EINVAL;
 
-	if (opt.local_id == 0)
-		return -EINVAL;
-
-	/* Delete is a special case: we ignore all fields other than local_id */
+	/* Delete is a special case: */
 	if (opt.flags & TCP_AUTHOPT_KEY_DEL) {
 		info = rcu_dereference_check(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
 		if (!info)
 			return -ENOENT;
-		key_info = __tcp_authopt_key_info_lookup(sk, info, opt.local_id);
+		key_info = tcp_authopt_key_lookup_exact(sk, info, &opt);
 		if (!key_info)
 			return -ENOENT;
 		tcp_authopt_key_del(sk, info, key_info);
@@ -446,8 +478,10 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	if (err)
 		return err;
 
-	/* If an old value exists for same local_id it is deleted */
-	key_info = __tcp_authopt_key_info_lookup(sk, info, opt.local_id);
+	/* If an old key exists with exact ID then remove and replace.
+	 * RCU-protected readers might observe both and pick any.
+	 */
+	key_info = tcp_authopt_key_lookup_exact(sk, info, &opt);
 	if (key_info)
 		tcp_authopt_key_del(sk, info, key_info);
 	key_info = sock_kmalloc(sk, sizeof(*key_info), GFP_KERNEL | __GFP_ZERO);
@@ -455,7 +489,6 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 		tcp_authopt_alg_release(alg);
 		return -ENOMEM;
 	}
-	key_info->local_id = opt.local_id;
 	key_info->flags = opt.flags & (TCP_AUTHOPT_KEY_EXCLUDE_OPTS | TCP_AUTHOPT_KEY_ADDR_BIND);
 	key_info->send_id = opt.send_id;
 	key_info->recv_id = opt.recv_id;

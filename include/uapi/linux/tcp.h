@@ -422,16 +422,18 @@ enum tcp_authopt_alg {
 
 /**
  * struct tcp_authopt_key - TCP Authentication KEY
+ *
+ * Key are identified by the combination of:
+ * - send_id
+ * - recv_id
+ * - addr (iff TCP_AUTHOPT_KEY_ADDR_BIND)
+ *
+ * RFC5925 requires that key ids must not overlap for the same TCP connection.
+ * This is not enforced by linux.
  */
 struct tcp_authopt_key {
 	/** @flags: Combination of &enum tcp_authopt_key_flag */
 	__u32	flags;
-	/**
-	 * @local_id: Local identifier
-	 *
-	 * Each key is identified by a non-zero local_id which is managed by the application.
-	 */
-	__u32	local_id;
 	/** @send_id: keyid value for send */
 	__u8	send_id;
 	/** @recv_id: keyid value for receive */
