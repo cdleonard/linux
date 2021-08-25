@@ -1073,22 +1073,22 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 				struct sockaddr_in *key_addr = (struct sockaddr_in *)&key->addr;
 				struct iphdr *iph = (struct iphdr *)skb_network_header(skb);
 
-				if (WARN_ON(key_addr->sin_family != AF_INET))
+				if (WARN_ON_ONCE(key_addr->sin_family != AF_INET))
 					continue;
-				if (WARN_ON(iph->version != 4))
+				if (WARN_ON_ONCE(iph->version != 4))
 					continue;
-				if (memcmp(&iph->saddr, &key_addr->sin_addr, sizeof(iph->saddr)))
+				if (iph->saddr != key_addr->sin_addr.s_addr)
 					continue;
 			}
 			if (sk->sk_family == AF_INET6) {
 				struct sockaddr_in6 *key_addr = (struct sockaddr_in6 *)&key->addr;
 				struct ipv6hdr *iph = (struct ipv6hdr *)skb_network_header(skb);
 
-				if (WARN_ON(key_addr->sin6_family != AF_INET6))
+				if (WARN_ON_ONCE(key_addr->sin6_family != AF_INET6))
 					continue;
-				if (WARN_ON(iph->version != 6))
+				if (WARN_ON_ONCE(iph->version != 6))
 					continue;
-				if (memcmp(&iph->saddr, &key_addr->sin6_addr, sizeof(iph->saddr)))
+				if (!ipv6_addr_equal(&iph->saddr, &key_addr->sin6_addr))
 					continue;
 			}
 		}
