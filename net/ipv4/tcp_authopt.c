@@ -163,15 +163,13 @@ static bool ipvx_addr_match(struct sockaddr_storage *a1,
 {
 	if (a1->ss_family != a2->ss_family)
 		return false;
-	if (a1->ss_family == AF_INET && memcmp(
-			&((struct sockaddr_in *)a1)->sin_addr,
-			&((struct sockaddr_in *)a2)->sin_addr,
-			sizeof(struct in_addr)))
+	if (a1->ss_family == AF_INET && (
+			((struct sockaddr_in *)a1)->sin_addr.s_addr !=
+			((struct sockaddr_in *)a2)->sin_addr.s_addr))
 		return false;
-	if (a1->ss_family == AF_INET6 && memcmp(
+	if (a1->ss_family == AF_INET6 && !ipv6_addr_equal(
 			&((struct sockaddr_in6 *)a1)->sin6_addr,
-			&((struct sockaddr_in6 *)a2)->sin6_addr,
-			sizeof(struct in6_addr)))
+			&((struct sockaddr_in6 *)a2)->sin6_addr))
 		return false;
 	return true;
 }
