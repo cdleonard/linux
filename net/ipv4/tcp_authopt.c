@@ -216,21 +216,18 @@ struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct tcp_authopt_info *in
 		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
 			if (addr_sk->sk_family == AF_INET) {
 				struct sockaddr_in *key_addr = (struct sockaddr_in *)&key->addr;
-				const struct in_addr *daddr =
-					(const struct in_addr *)&addr_sk->sk_daddr;
 
-				if (WARN_ON(key_addr->sin_family != AF_INET))
+				if (WARN_ON_ONCE(key_addr->sin_family != AF_INET))
 					continue;
-				if (memcmp(daddr, &key_addr->sin_addr, sizeof(*daddr)))
+				if (addr_sk->sk_daddr != key_addr->sin_addr.s_addr)
 					continue;
 			}
 			if (addr_sk->sk_family == AF_INET6) {
 				struct sockaddr_in6 *key_addr = (struct sockaddr_in6 *)&key->addr;
-				const struct in6_addr *daddr = &addr_sk->sk_v6_daddr;
 
-				if (WARN_ON(key_addr->sin6_family != AF_INET6))
+				if (WARN_ON_ONCE(key_addr->sin6_family != AF_INET6))
 					continue;
-				if (memcmp(daddr, &key_addr->sin6_addr, sizeof(*daddr)))
+				if (!ipv6_addr_equal(&addr_sk->sk_v6_daddr, &key_addr->sin6_addr))
 					continue;
 			}
 		}
