@@ -540,7 +540,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	/* Clear value copies from oldsk: */
 	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, NULL);
 
-	new_info = kzmalloc(sizeof(*new_info), GFP_ATOMIC);
+	new_info = kzalloc(sizeof(*new_info), GFP_ATOMIC);
 	if (!new_info)
 		return -ENOMEM;
 
