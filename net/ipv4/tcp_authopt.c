@@ -422,11 +422,6 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 			return err;
 	} else {
 		if (ipv6) {
-			struct in6_addr *saddr;
-			struct in6_addr *daddr;
-
-			saddr = &sk->sk_v6_rcv_saddr;
-			daddr = &sk->sk_v6_daddr;
 			err = crypto_shash_update(desc, (u8 *)&sk->sk_v6_rcv_saddr, 16);
 			if (err)
 				return err;
