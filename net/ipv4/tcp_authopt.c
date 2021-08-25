@@ -506,7 +506,7 @@ static int tcp_authopt_clone_keys(struct sock *newsk,
 	struct tcp_authopt_key_info *old_key;
 	struct tcp_authopt_key_info *new_key;
 
-	hlist_for_each_entry_rcu(old_key, &old_info->head, node, lockdep_sock_is_held(sk)) {
+	hlist_for_each_entry_rcu(old_key, &old_info->head, node, lockdep_sock_is_held(oldsk)) {
 		new_key = sock_kmalloc(newsk, sizeof(*new_key), GFP_ATOMIC);
 		if (!new_key)
 			return -ENOMEM;
