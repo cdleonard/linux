@@ -203,9 +203,9 @@ static struct tcp_authopt_key_info *tcp_authopt_key_lookup_exact(const struct so
 	return NULL;
 }
 
-struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct tcp_authopt_info *info,
-						     const struct sock *addr_sk,
-						     int send_id)
+static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct tcp_authopt_info *info,
+							    const struct sock *addr_sk,
+							    int send_id)
 {
 	struct tcp_authopt_key_info *result = NULL;
 	struct tcp_authopt_key_info *key;
