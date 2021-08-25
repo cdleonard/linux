@@ -489,11 +489,13 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	if (!old_info)
 		return 0;
 
-	new_info = kmalloc(sizeof(*new_info), GFP_ATOMIC | __GFP_ZERO);
+	/* Clear value copies from oldsk: */
+	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, NULL);
+
+	new_info = kzmalloc(sizeof(*new_info), GFP_ATOMIC);
 	if (!new_info)
 		return -ENOMEM;
 
-	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
 	new_info->src_isn = tcp_rsk(req)->snt_isn;
 	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
 	INIT_HLIST_HEAD(&new_info->head);
@@ -502,6 +504,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 		__tcp_authopt_info_free(newsk, new_info);
 		return err;
 	}
+	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
 	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, new_info);
 
 	return 0;
