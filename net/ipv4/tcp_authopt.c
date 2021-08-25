@@ -63,7 +63,7 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	if (info)
 		return info;
 
-	info = kmalloc(sizeof(*info), GFP_KERNEL | __GFP_ZERO);
+	info = kzmalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return ERR_PTR(-ENOMEM);
 
