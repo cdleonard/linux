@@ -977,13 +977,13 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
  * __tcp_authopt_calc_mac - Compute packet MAC using key
  *
  * @macbuf: output buffer. Must be large enough to fit the digestsize of the
- * 			underlying transform before truncation. Please use TCP_AUTHOPT_MAXMACBUF
+ *          underlying transform before truncation. Please use TCP_AUTHOPT_MAXMACBUF
  */
-int __tcp_authopt_calc_mac(struct sock *sk,
-			   struct sk_buff *skb,
-			   struct tcp_authopt_key_info *key,
-			   bool input,
-			   char *macbuf)
+static int __tcp_authopt_calc_mac(struct sock *sk,
+				  struct sk_buff *skb,
+				  struct tcp_authopt_key_info *key,
+				  bool input,
+				  char *macbuf)
 {
 	struct crypto_shash *mac_tfm;
 	u8 traffic_key[TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN];
