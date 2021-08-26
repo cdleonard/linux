@@ -6,6 +6,11 @@
 #include <crypto/hash.h>
 #include <trace/events/tcp.h>
 
+/* This is enabled and disabled with struct tcp_authopt_info alloc/free */
+DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed);
+/* only for CONFIG_IPV6=m */
+EXPORT_SYMBOL(tcp_authopt_needed);
+
 /* All current algorithms have a mac length of 12 but crypto API digestsize can be larger */
 #define TCP_AUTHOPT_MAXMACBUF	20
 #define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN	20
@@ -287,6 +292,7 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	sk_nocaps_add(sk, NETIF_F_GSO_MASK);
 	INIT_HLIST_HEAD(&info->head);
 	rcu_assign_pointer(tp->authopt_info, info);
+	static_branch_inc(&tcp_authopt_needed);
 
 	return info;
 }
@@ -374,6 +380,7 @@ static void __tcp_authopt_info_free(struct sock *sk, struct tcp_authopt_info *in
 	hlist_for_each_entry_safe(key, n, &info->head, node)
 		tcp_authopt_key_del(sk, info, key);
 	kfree_rcu(info, rcu);
+	static_branch_dec(&tcp_authopt_needed);
 }
 
 /* free everything and clear tcp_sock.authopt_info to NULL */
@@ -524,6 +531,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	}
 	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
 	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, new_info);
+	static_branch_inc(&tcp_authopt_needed);
 
 	return 0;
 }
