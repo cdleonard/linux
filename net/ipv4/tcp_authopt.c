@@ -5,6 +5,11 @@
 #include <net/tcp_authopt.h>
 #include <crypto/hash.h>
 
+/* This is enabled and disabled with struct tcp_authopt_info alloc/free */
+DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed);
+/* only for CONFIG_IPV6=m */
+EXPORT_SYMBOL(tcp_authopt_needed);
+
 /* All current algorithms have a mac length of 12 but crypto API digestsize can be larger */
 #define TCP_AUTHOPT_MAXMACBUF			20
 #define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN		20
@@ -281,6 +286,8 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	if (!info)
 		return ERR_PTR(-ENOMEM);
 
+	/* Never released: */
+	static_branch_inc(&tcp_authopt_needed);
 	sk_nocaps_add(sk, NETIF_F_GSO_MASK);
 	INIT_HLIST_HEAD(&info->head);
 	rcu_assign_pointer(tp->authopt_info, info);
