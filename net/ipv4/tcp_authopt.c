@@ -24,8 +24,9 @@ struct tcp_authopt_alg_imp {
 	u8 maclen;
 
 	/* shared crypto_shash */
+	struct mutex init_mutex;
 	spinlock_t lock;
-	int ref_cnt;
+	bool init_done;
 	struct crypto_shash *tfm;
 };
 
@@ -36,6 +37,7 @@ static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
 		.traffic_key_len = 20,
 		.maclen = 12,
 		.lock = __SPIN_LOCK_UNLOCKED(tcp_authopt_alg_list[0].lock),
+		.init_mutex = __MUTEX_INITIALIZER(tcp_authopt_alg_list[0].init_mutex),
 	},
 	{
 		.alg_id = TCP_AUTHOPT_ALG_AES_128_CMAC_96,
@@ -43,6 +45,7 @@ static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
 		.traffic_key_len = 16,
 		.maclen = 12,
 		.lock = __SPIN_LOCK_UNLOCKED(tcp_authopt_alg_list[1].lock),
+		.init_mutex = __MUTEX_INITIALIZER(tcp_authopt_alg_list[1].init_mutex),
 	},
 };
 
@@ -58,84 +61,42 @@ static inline struct tcp_authopt_alg_imp *tcp_authopt_alg_get(int alg_num)
 static int tcp_authopt_alg_require(struct tcp_authopt_alg_imp *alg)
 {
 	struct crypto_shash *tfm = NULL;
-	bool need_init = false;
-
-	might_sleep();
 
 	/* If we're the first user then we need to initialize shash but we might lose the race. */
-	spin_lock_bh(&alg->lock);
-	WARN_ON(alg->ref_cnt < 0);
-	if (alg->ref_cnt == 0)
-		need_init = true;
-	else
-		++alg->ref_cnt;
-	spin_unlock_bh(&alg->lock);
-
-	/* Already initialized */
-	if (!need_init)
+	mutex_lock(&alg->init_mutex);
+	if (alg->init_done) {
+		mutex_unlock(&alg->init_mutex);
 		return 0;
+	}
 
-	tfm = crypto_alloc_shash(alg->alg_name, 0, 0);
-	if (IS_ERR(tfm))
+	alg->tfm = crypto_alloc_shash(alg->alg_name, 0, 0);
+	if (IS_ERR(alg->tfm)) {
+		alg->tfm = NULL;
 		return PTR_ERR(tfm);
-
-	spin_lock_bh(&alg->lock);
-	if (alg->ref_cnt == 0)
-		/* race won */
-		alg->tfm = tfm;
-	else
-		/* race lost, free tfm later */
-		need_init = false;
-	++alg->ref_cnt;
-	spin_unlock_bh(&alg->lock);
-
-	if (!need_init)
-		crypto_free_shash(tfm);
-	else
-		pr_info("initialized tcp-ao %s", alg->alg_name);
+	}
+	pr_info("initialized tcp-ao algorithm %s", alg->alg_name);
+	alg->init_done = true;
+	mutex_unlock(&alg->init_mutex);
 
 	return 0;
 }
 
 static void tcp_authopt_alg_release(struct tcp_authopt_alg_imp *alg)
 {
-	struct crypto_shash *tfm_to_free = NULL;
-
-	spin_lock_bh(&alg->lock);
-	--alg->ref_cnt;
-	WARN_ON(alg->ref_cnt < 0);
-	if (alg->ref_cnt == 0) {
-		tfm_to_free = alg->tfm;
-		alg->tfm = NULL;
-	}
-	spin_unlock_bh(&alg->lock);
-
-	if (tfm_to_free) {
-		pr_info("released tcp-ao %s", alg->alg_name);
-		crypto_free_shash(tfm_to_free);
-	}
-}
-
-/* increase reference count on an algorithm that is already in use */
-static void tcp_authopt_alg_incref(struct tcp_authopt_alg_imp *alg)
-{
-	spin_lock_bh(&alg->lock);
-	WARN_ON(alg->ref_cnt <= 0);
-	++alg->ref_cnt;
-	spin_unlock_bh(&alg->lock);
 }
 
 static struct crypto_shash *tcp_authopt_alg_get_tfm(struct tcp_authopt_alg_imp *alg)
 {
+	lockdep_assert_preemption_disabled();
 	spin_lock_bh(&alg->lock);
-	WARN_ON(alg->ref_cnt < 0);
 	return alg->tfm;
 }
 
 static void tcp_authopt_alg_put_tfm(struct tcp_authopt_alg_imp *alg, struct crypto_shash *tfm)
 {
-	WARN_ON(tfm != alg->tfm);
 	spin_unlock_bh(&alg->lock);
+	lockdep_assert_preemption_disabled();
+	WARN_ON(tfm != alg->tfm);
 }
 
 static struct crypto_shash *tcp_authopt_get_kdf_shash(struct tcp_authopt_key_info *key)
@@ -513,7 +474,6 @@ static int tcp_authopt_clone_keys(struct sock *newsk,
 		if (!new_key)
 			return -ENOMEM;
 		memcpy(new_key, old_key, sizeof(*new_key));
-		tcp_authopt_alg_incref(old_key->alg);
 		hlist_add_head_rcu(&new_key->node, &new_info->head);
 	}
 
