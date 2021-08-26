@@ -25,9 +25,8 @@ struct tcp_authopt_alg_imp {
 
 	/* shared crypto_shash */
 	struct mutex init_mutex;
-	spinlock_t lock;
 	bool init_done;
-	struct crypto_shash *tfm;
+	struct crypto_shash *tfm[NR_CPUS];
 };
 
 static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
@@ -36,7 +35,6 @@ static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
 		.alg_name = "hmac(sha1)",
 		.traffic_key_len = 20,
 		.maclen = 12,
-		.lock = __SPIN_LOCK_UNLOCKED(tcp_authopt_alg_list[0].lock),
 		.init_mutex = __MUTEX_INITIALIZER(tcp_authopt_alg_list[0].init_mutex),
 	},
 	{
@@ -44,7 +42,6 @@ static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
 		.alg_name = "cmac(aes)",
 		.traffic_key_len = 16,
 		.maclen = 12,
-		.lock = __SPIN_LOCK_UNLOCKED(tcp_authopt_alg_list[1].lock),
 		.init_mutex = __MUTEX_INITIALIZER(tcp_authopt_alg_list[1].init_mutex),
 	},
 };
@@ -57,28 +54,51 @@ static inline struct tcp_authopt_alg_imp *tcp_authopt_alg_get(int alg_num)
 	return &tcp_authopt_alg_list[alg_num - 1];
 }
 
-/* Mark an algorithm as in-use from user context */
-static int tcp_authopt_alg_require(struct tcp_authopt_alg_imp *alg)
+static void __tcp_authopt_alg_free(struct tcp_authopt_alg_imp *alg)
 {
-	struct crypto_shash *tfm = NULL;
+	int cpu;
 
-	/* If we're the first user then we need to initialize shash but we might lose the race. */
-	mutex_lock(&alg->init_mutex);
-	if (alg->init_done) {
-		mutex_unlock(&alg->init_mutex);
-		return 0;
+	for_each_possible_cpu(cpu) {
+		if (alg->tfm[cpu]) {
+			crypto_free_shash(alg->tfm[cpu]);
+			alg->tfm[cpu] = NULL;
+		}
 	}
+}
 
-	alg->tfm = crypto_alloc_shash(alg->alg_name, 0, 0);
-	if (IS_ERR(alg->tfm)) {
-		alg->tfm = NULL;
-		return PTR_ERR(tfm);
+static int __tcp_authopt_alg_init(struct tcp_authopt_alg_imp *alg)
+{
+	struct crypto_shash *tfm;
+	int cpu;
+
+	for_each_possible_cpu(cpu) {
+		tfm = crypto_alloc_shash(alg->alg_name, 0, 0);
+		if (IS_ERR(tfm)) {
+			__tcp_authopt_alg_free(alg);
+			return PTR_ERR(tfm);
+		}
+		alg->tfm[cpu] = tfm;
 	}
-	pr_info("initialized tcp-ao algorithm %s", alg->alg_name);
-	alg->init_done = true;
-	mutex_unlock(&alg->init_mutex);
 
 	return 0;
+}
+
+static int tcp_authopt_alg_require(struct tcp_authopt_alg_imp *alg)
+{
+	int err = 0;
+
+	mutex_lock(&alg->init_mutex);
+	if (alg->init_done)
+		goto out;
+	err = __tcp_authopt_alg_init(alg);
+	if (err)
+		goto out;
+	pr_info("initialized tcp-ao algorithm %s", alg->alg_name);
+	alg->init_done = true;
+
+out:
+	mutex_unlock(&alg->init_mutex);
+	return err;
 }
 
 static void tcp_authopt_alg_release(struct tcp_authopt_alg_imp *alg)
@@ -88,15 +108,13 @@ static void tcp_authopt_alg_release(struct tcp_authopt_alg_imp *alg)
 static struct crypto_shash *tcp_authopt_alg_get_tfm(struct tcp_authopt_alg_imp *alg)
 {
 	lockdep_assert_preemption_disabled();
-	spin_lock_bh(&alg->lock);
-	return alg->tfm;
+	return alg->tfm[smp_processor_id()];
 }
 
 static void tcp_authopt_alg_put_tfm(struct tcp_authopt_alg_imp *alg, struct crypto_shash *tfm)
 {
-	spin_unlock_bh(&alg->lock);
 	lockdep_assert_preemption_disabled();
-	WARN_ON(tfm != alg->tfm);
+	WARN_ON(tfm != alg->tfm[smp_processor_id()]);
 }
 
 static struct crypto_shash *tcp_authopt_get_kdf_shash(struct tcp_authopt_key_info *key)
