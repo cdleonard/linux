@@ -52,6 +52,8 @@ struct tcp_authopt_info {
 };
 
 #ifdef CONFIG_TCP_AUTHOPT
+DECLARE_STATIC_KEY_FALSE(tcp_authopt_needed);
+
 void tcp_authopt_clear(struct sock *sk);
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
 int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key);
@@ -66,11 +68,12 @@ static inline struct tcp_authopt_key_info *tcp_authopt_select_key(
 		const struct sock *addr_sk,
 		u8 *rnextkeyid)
 {
-	struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
+	if (static_branch_unlikely(&tcp_authopt_needed)) {
+		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
 
-	if (info)
-		return __tcp_authopt_select_key(sk, info, addr_sk, rnextkeyid);
-
+		if (info)
+			return __tcp_authopt_select_key(sk, info, addr_sk, rnextkeyid);
+	}
 	return NULL;
 }
 int tcp_authopt_hash(
@@ -99,10 +102,12 @@ int __tcp_authopt_inbound_check(
  */
 static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb)
 {
-	struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
+	if (static_branch_unlikely(&tcp_authopt_needed)) {
+		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
 
-	if (info)
-		return __tcp_authopt_inbound_check(sk, skb, info);
+		if (info)
+			return __tcp_authopt_inbound_check(sk, skb, info);
+	}
 
 	return 0;
 }
