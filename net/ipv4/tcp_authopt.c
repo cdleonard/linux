@@ -1142,3 +1142,5 @@ accept:
 
 	return 0;
 }
+/* only for CONFIG_IPV6=m */
+EXPORT_SYMBOL(__tcp_authopt_inbound_check);
