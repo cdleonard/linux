@@ -8,6 +8,8 @@
 
 /* This is enabled and disabled with struct tcp_authopt_info alloc/free */
 DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed);
+/* only for CONFIG_IPV6=m */
+EXPORT_SYMBOL(tcp_authopt_needed);
 
 /* All current algorithms have a mac length of 12 but crypto API digestsize can be larger */
 #define TCP_AUTHOPT_MAXMACBUF	20
