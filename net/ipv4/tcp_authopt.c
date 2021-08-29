@@ -28,7 +28,7 @@ struct tcp_authopt_alg_imp {
 	/* shared crypto_shash */
 	struct mutex init_mutex;
 	bool init_done;
-	struct crypto_shash *tfm[NR_CPUS];
+	struct crypto_shash * __percpu *tfms;
 };
 
 static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
@@ -59,13 +59,19 @@ static inline struct tcp_authopt_alg_imp *tcp_authopt_alg_get(int alg_num)
 static void __tcp_authopt_alg_free(struct tcp_authopt_alg_imp *alg)
 {
 	int cpu;
+	struct crypto_shash *tfm;
 
+	if (!alg->tfms)
+		return;
 	for_each_possible_cpu(cpu) {
-		if (alg->tfm[cpu]) {
-			crypto_free_shash(alg->tfm[cpu]);
-			alg->tfm[cpu] = NULL;
+		tfm = *per_cpu_ptr(alg->tfms, cpu);
+		if (tfm) {
+			crypto_free_shash(tfm);
+			*per_cpu_ptr(alg->tfms, cpu) = NULL;
 		}
 	}
+	free_percpu(alg->tfms);
+	alg->tfms = NULL;
 }
 
 static int __tcp_authopt_alg_init(struct tcp_authopt_alg_imp *alg)
@@ -73,15 +79,20 @@ static int __tcp_authopt_alg_init(struct tcp_authopt_alg_imp *alg)
 	struct crypto_shash *tfm;
 	int cpu;
 
+	alg->tfms = alloc_percpu(struct crypto_shash*);
+	if (!alg->tfms)
+		return -ENOMEM;
+	for_each_possible_cpu(cpu) {
+		WARN_ON(*per_cpu_ptr(alg->tfms, cpu) != NULL);
+	}
 	for_each_possible_cpu(cpu) {
 		tfm = crypto_alloc_shash(alg->alg_name, 0, 0);
 		if (IS_ERR(tfm)) {
 			__tcp_authopt_alg_free(alg);
 			return PTR_ERR(tfm);
 		}
-		alg->tfm[cpu] = tfm;
+		*per_cpu_ptr(alg->tfms, cpu) = tfm;
 	}
-
 	return 0;
 }
 
@@ -109,14 +120,14 @@ static void tcp_authopt_alg_release(struct tcp_authopt_alg_imp *alg)
 
 static struct crypto_shash *tcp_authopt_alg_get_tfm(struct tcp_authopt_alg_imp *alg)
 {
-	lockdep_assert_preemption_disabled();
-	return alg->tfm[smp_processor_id()];
+	preempt_disable();
+	return *this_cpu_ptr(alg->tfms);
 }
 
 static void tcp_authopt_alg_put_tfm(struct tcp_authopt_alg_imp *alg, struct crypto_shash *tfm)
 {
-	lockdep_assert_preemption_disabled();
-	WARN_ON(tfm != alg->tfm[smp_processor_id()]);
+	WARN_ON(tfm != *this_cpu_ptr(alg->tfms));
+	preempt_enable();
 }
 
 static struct crypto_shash *tcp_authopt_get_kdf_shash(struct tcp_authopt_key_info *key)
