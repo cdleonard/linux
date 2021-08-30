@@ -360,13 +360,6 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	return 0;
 }
 
-static void tcp_authopt_key_free_rcu(struct rcu_head *rcu)
-{
-	struct tcp_authopt_key_info *key = container_of(rcu, struct tcp_authopt_key_info, rcu);
-
-	kfree(key);
-}
-
 static void tcp_authopt_key_del(struct sock *sk,
 				struct tcp_authopt_info *info,
 				struct tcp_authopt_key_info *key)
