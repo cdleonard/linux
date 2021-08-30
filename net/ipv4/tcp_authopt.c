@@ -751,7 +751,7 @@ static int tcp_authopt_hash_tcp6_pseudoheader(struct shash_desc *desc,
 					      u32 plen)
 {
 	int err;
-	u32 buf[2];
+	__be32 buf[2];
 
 	buf[0] = htonl(plen);
 	buf[1] = htonl(IPPROTO_TCP);
