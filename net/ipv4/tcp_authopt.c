@@ -462,10 +462,8 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	if (key_info)
 		tcp_authopt_key_del(sk, info, key_info);
 	key_info = sock_kmalloc(sk, sizeof(*key_info), GFP_KERNEL | __GFP_ZERO);
-	if (!key_info) {
-		tcp_authopt_alg_release(alg);
+	if (!key_info)
 		return -ENOMEM;
-	}
 	key_info->flags = opt.flags & TCP_AUTHOPT_KEY_KNOWN_FLAGS;
 	key_info->send_id = opt.send_id;
 	key_info->recv_id = opt.recv_id;
@@ -493,7 +491,6 @@ static int tcp_authopt_clone_keys(struct sock *newsk,
 		if (!new_key)
 			return -ENOMEM;
 		memcpy(new_key, old_key, sizeof(*new_key));
-		tcp_authopt_alg_incref(old_key->alg);
 		hlist_add_head_rcu(&new_key->node, &new_info->head);
 	}
 
