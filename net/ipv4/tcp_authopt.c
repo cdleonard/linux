@@ -114,10 +114,6 @@ out:
 	return err;
 }
 
-static void tcp_authopt_alg_release(struct tcp_authopt_alg_imp *alg)
-{
-}
-
 static struct crypto_shash *tcp_authopt_alg_get_tfm(struct tcp_authopt_alg_imp *alg)
 {
 	preempt_disable();
@@ -368,7 +364,6 @@ static void tcp_authopt_key_free_rcu(struct rcu_head *rcu)
 {
 	struct tcp_authopt_key_info *key = container_of(rcu, struct tcp_authopt_key_info, rcu);
 
-	tcp_authopt_alg_release(key->alg);
 	kfree(key);
 }
 
@@ -380,7 +375,7 @@ static void tcp_authopt_key_del(struct sock *sk,
 	if (info->send_key == key)
 		info->send_key = NULL;
 	atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
-	call_rcu(&key->rcu, tcp_authopt_key_free_rcu);
+	kfree_rcu(key, rcu);
 }
 
 /* free info and keys but don't touch tp->authopt_info */
