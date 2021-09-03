@@ -850,6 +850,10 @@ static void tcp_v4_send_ack(const struct sock *sk,
 #ifdef CONFIG_TCP_MD5SIG
 			   + (TCPOLEN_MD5SIG_ALIGNED >> 2)
 #endif
+#ifdef CONFIG_TCP_AUTHOPT
+			/* TCP-AO length is exactly 16 bytes for all supported algorithms */
+			   + (4)
+#endif
 			];
 	} rep;
 	struct net *net = sock_net(sk);
@@ -895,6 +899,35 @@ static void tcp_v4_send_ack(const struct sock *sk,
 				    key, ip_hdr(skb)->saddr,
 				    ip_hdr(skb)->daddr, &rep.th);
 	}
+#endif
+#ifdef CONFIG_TCP_AUTHOPT
+	if (static_branch_unlikely(&tcp_authopt_needed))
+	{
+		struct tcp_authopt_info *info;
+		struct tcp_authopt_key_info *key_info;
+		u8 rnextkeyid;
+
+		if (sk->sk_state == TCP_TIME_WAIT)
+			info = tcp_twsk(sk)->tw_authopt_info;
+		else
+			info = tcp_sk(sk)->authopt_info;
+
+		if (!info)
+			goto no_authopt;
+		key_info = __tcp_authopt_select_key(sk, info, sk, &rnextkeyid);
+		if (WARN_ON_ONCE(key_info->maclen != 12))
+			goto no_authopt;
+		if (key_info) {
+			rep.opt[rep.th.doff] = htonl((TCPOPT_AUTHOPT << 24) |
+						     (16 << 16) |
+						     (key_info->send_id << 8) |
+						     (rnextkeyid));
+			tcp_authopt_hash((char*)&rep.opt[rep.th.doff + 1], key_info, (struct sock*)sk, skb);
+			arg.iov[0].iov_len += 16;
+			rep.th.doff += 4;
+		}
+	}
+no_authopt:
 #endif
 	arg.flags = reply_flags;
 	arg.csum = csum_tcpudp_nofold(ip_hdr(skb)->daddr,
