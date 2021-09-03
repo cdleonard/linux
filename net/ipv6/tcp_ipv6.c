@@ -898,6 +898,11 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 	__be32 mrst = 0, *topt;
 	struct dst_entry *dst;
 	__u32 mark = 0;
+#ifdef CONFIG_TCP_AUTHOPT
+	struct tcp_authopt_info *authopt_info = NULL;
+	struct tcp_authopt_key_info *authopt_key_info = NULL;
+	u8 authopt_rnextkeyid;
+#endif
 
 	if (tsecr)
 		tot_len += TCPOLEN_TSTAMP_ALIGNED;
@@ -912,6 +917,24 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 
 		if (mrst)
 			tot_len += sizeof(__be32);
+	}
+#endif
+#ifdef CONFIG_TCP_AUTHOPT
+	/* Key lookup before SKB allocation */
+	if (static_branch_unlikely(&tcp_authopt_needed) && sk)
+	{
+		if (sk->sk_state == TCP_TIME_WAIT)
+			authopt_info = tcp_twsk(sk)->tw_authopt_info;
+		else
+			authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
+
+		if (authopt_info) {
+			authopt_key_info = __tcp_authopt_select_key(sk, authopt_info, sk, &authopt_rnextkeyid);
+			if (WARN_ON_ONCE(authopt_key_info->maclen != 12))
+				authopt_key_info = NULL;
+			else
+				tot_len += 16;
+		}
 	}
 #endif
 
@@ -955,6 +978,17 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 		tcp_v6_md5_hash_hdr((__u8 *)topt, key,
 				    &ipv6_hdr(skb)->saddr,
 				    &ipv6_hdr(skb)->daddr, t1);
+	}
+#endif
+#ifdef CONFIG_TCP_AUTHOPT
+	/* Compute the TCP-AO mac. Unlike in the ipv4 case we have a real SKB */
+	if (static_branch_unlikely(&tcp_authopt_needed) && authopt_key_info)
+	{
+		*topt++ = htonl((TCPOPT_AUTHOPT << 24) |
+				(16 << 16) |
+				(authopt_key_info->send_id << 8) |
+				(authopt_rnextkeyid));
+		tcp_authopt_hash((char*)topt, authopt_key_info, (struct sock*)sk, buff);
 	}
 #endif
 
