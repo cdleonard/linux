@@ -957,6 +957,33 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 				    &ipv6_hdr(skb)->daddr, t1);
 	}
 #endif
+#ifdef CONFIG_TCP_AUTHOPT
+	if (static_branch_unlikely(&tcp_authopt_needed))
+	{
+		struct tcp_authopt_info *info;
+		struct tcp_authopt_key_info *key_info;
+		u8 rnextkeyid;
+
+		if (sk->sk_state == TCP_TIME_WAIT)
+			info = tcp_twsk(sk)->tw_authopt_info;
+		else
+			info = tcp_sk(sk)->authopt_info;
+
+		if (!info)
+			goto no_authopt;
+		key_info = __tcp_authopt_select_key(sk, info, sk, &rnextkeyid);
+		if (WARN_ON_ONCE(key_info->maclen != 12))
+			goto no_authopt;
+		if (key_info) {
+			*topt++ = htonl((TCPOPT_AUTHOPT << 24) |
+					(16 << 16) |
+					(key_info->send_id << 8) |
+					(rnextkeyid));
+			tcp_authopt_hash((char*)topt, key_info, (struct sock*)sk, buff);
+		}
+	}
+no_authopt:
+#endif
 
 	memset(&fl6, 0, sizeof(fl6));
 	fl6.daddr = ipv6_hdr(skb)->saddr;
