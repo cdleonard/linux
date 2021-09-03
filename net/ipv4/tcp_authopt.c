@@ -289,10 +289,11 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	if (!info)
 		return ERR_PTR(-ENOMEM);
 
+	/* Never released: */
+	static_branch_inc(&tcp_authopt_needed);
 	sk_nocaps_add(sk, NETIF_F_GSO_MASK);
 	INIT_HLIST_HEAD(&info->head);
 	rcu_assign_pointer(tp->authopt_info, info);
-	static_branch_inc(&tcp_authopt_needed);
 
 	return info;
 }
@@ -380,7 +381,6 @@ static void __tcp_authopt_info_free(struct sock *sk, struct tcp_authopt_info *in
 	hlist_for_each_entry_safe(key, n, &info->head, node)
 		tcp_authopt_key_del(sk, info, key);
 	kfree_rcu(info, rcu);
-	static_branch_dec(&tcp_authopt_needed);
 }
 
 /* free everything and clear tcp_sock.authopt_info to NULL */
@@ -531,7 +531,6 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	}
 	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
 	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, new_info);
-	static_branch_inc(&tcp_authopt_needed);
 
 	return 0;
 }
