@@ -54,6 +54,7 @@ struct tcp_authopt_info {
 #ifdef CONFIG_TCP_AUTHOPT
 DECLARE_STATIC_KEY_FALSE(tcp_authopt_needed);
 
+void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info);
 void tcp_authopt_clear(struct sock *sk);
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
 int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key);
@@ -126,6 +127,9 @@ static inline int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned in
 static inline int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key)
 {
 	return -ENOPROTOOPT;
+}
+static inline void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info)
+{
 }
 static inline void tcp_authopt_clear(struct sock *sk)
 {

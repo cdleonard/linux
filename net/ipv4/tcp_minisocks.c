@@ -310,7 +310,7 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
 			}
 		} while (0);
 #endif
-		tcp_authopt_time_wait(tcptw, tp);
+		tcp_authopt_time_wait(tcptw, tcp_sk(sk));
 
 		/* Get the TIME_WAIT timeout firing. */
 		if (timeo < rto)
@@ -357,8 +357,8 @@ void tcp_twsk_destructor(struct sock *sk)
 	if (static_branch_unlikely(&tcp_authopt_needed)) {
 		struct tcp_timewait_sock *twsk = tcp_twsk(sk);
 
-		if (twsk->tw_authopt)
-			pr_err("leak tcp_authopt=%p", twsk->tw_authopt)
+		if (twsk->tw_authopt_info)
+			tcp_authopt_free(sk, twsk->tw_authopt_info);
 	}
 #endif
 }
