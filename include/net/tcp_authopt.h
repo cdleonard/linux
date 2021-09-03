@@ -96,10 +96,11 @@ static inline void tcp_authopt_time_wait(
 		struct tcp_sock *tp)
 {
 	if (static_branch_unlikely(&tcp_authopt_needed)) {
-		tcptw->tw_authopt = tp->authopt_info;
+		/* Is this safe? */
+		tcptw->tw_authopt_info = tp->authopt_info;
 		tp->authopt_info = NULL;
 	} else {
-		tcptw->tw_authopt = NULL;
+		tcptw->tw_authopt_info = NULL;
 	}
 }
 int __tcp_authopt_inbound_check(

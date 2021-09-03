@@ -901,10 +901,10 @@ static void tcp_v4_send_ack(const struct sock *sk,
 	}
 #endif
 #ifdef CONFIG_TCP_AUTHOPT
-	if (static_key_false(&tcp_authopt_needed))
+	if (static_branch_unlikely(&tcp_authopt_needed))
 	{
 		struct tcp_authopt_info *info;
-		struct tcp_authopt_info *key_info;
+		struct tcp_authopt_key_info *key_info;
 		u8 rnextkeyid;
 
 		if (sk->sk_state == TCP_TIME_WAIT)
@@ -915,14 +915,14 @@ static void tcp_v4_send_ack(const struct sock *sk,
 		if (!info)
 			goto no_authopt;
 		key_info = __tcp_authopt_select_key(sk, info, sk, &rnextkeyid);
-		if (WARN_ON_ONCE(key->maclen != 12))
+		if (WARN_ON_ONCE(key_info->maclen != 12))
 			goto no_authopt;
 		if (key_info) {
 			rep.opt[rep.th.doff] = htonl((TCPOPT_AUTHOPT << 24) |
-						     (16 << 16)
-						     (keyinfo->send_id << 8) |
+						     (16 << 16) |
+						     (key_info->send_id << 8) |
 						     (rnextkeyid));
-			tcp_authopt_hash(&rep.opt[rep.th.doff + 1], key_info, sk, skb);
+			tcp_authopt_hash((char*)&rep.opt[rep.th.doff + 1], key_info, (struct sock*)sk, skb);
 			arg.iov[0].iov_len += 16;
 			rep.th.doff += 4;
 		}
