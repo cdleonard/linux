@@ -368,12 +368,14 @@ static void tcp_authopt_key_del(struct sock *sk,
 	hlist_del_rcu(&key->node);
 	if (info->send_key == key)
 		info->send_key = NULL;
-	atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
+	/* missing on timewait case: */
+	if (sk)
+		atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
 	kfree_rcu(key, rcu);
 }
 
 /* free info and keys but don't touch tp->authopt_info */
-static void __tcp_authopt_info_free(struct sock *sk, struct tcp_authopt_info *info)
+void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info)
 {
 	struct hlist_node *n;
 	struct tcp_authopt_key_info *key;
@@ -390,7 +392,7 @@ void tcp_authopt_clear(struct sock *sk)
 
 	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
 	if (info) {
-		__tcp_authopt_info_free(sk, info);
+		tcp_authopt_free(sk, info);
 		tcp_sk(sk)->authopt_info = NULL;
 	}
 }
@@ -525,7 +527,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	INIT_HLIST_HEAD(&new_info->head);
 	err = tcp_authopt_clone_keys(newsk, oldsk, new_info, old_info);
 	if (err) {
-		__tcp_authopt_info_free(newsk, new_info);
+		tcp_authopt_free(newsk, new_info);
 		return err;
 	}
 	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
@@ -695,7 +697,70 @@ static int tcp_authopt_get_traffic_key(struct sock *sk,
 	err = crypto_shash_final(desc, traffic_key);
 	if (err)
 		goto out;
-	//printk("traffic_key: %*phN\n", 20, traffic_key);
+
+out:
+	tcp_authopt_put_kdf_shash(key, kdf_tfm);
+	return err;
+}
+
+struct tcp_v4_authopt_context_data {
+	__be32 saddr;
+	__be32 daddr;
+	__be16 sport;
+	__be16 dport;
+	__be32 sisn;
+	__be32 disn;
+	__be16 digestbits;
+} __packed;
+
+static int tcp_v4_authopt_get_traffic_key_noskb(
+		struct tcp_authopt_key_info *key,
+		__be32 saddr,
+		__be32 daddr,
+		__be16 sport,
+		__be16 dport,
+		__be32 sisn,
+		__be32 disn,
+		u8 *traffic_key)
+{
+	int err;
+	struct crypto_shash *kdf_tfm;
+	SHASH_DESC_ON_STACK(desc, kdf_tfm);
+	struct tcp_v4_authopt_context_data data;
+	BUILD_BUG_ON(sizeof(data) != 22);
+
+	kdf_tfm = tcp_authopt_get_kdf_shash(key);
+	if (IS_ERR(kdf_tfm))
+		return PTR_ERR(kdf_tfm);
+
+	err = tcp_authopt_setkey(kdf_tfm, key);
+	if (err)
+		goto out;
+
+	desc->tfm = kdf_tfm;
+	err = crypto_shash_init(desc);
+	if (err)
+		goto out;
+
+	// RFC5926 section 3.1.1.1
+	// Separate to keep alignment semi-sane
+	err = crypto_shash_update(desc, "\x01TCP-AO", 7);
+	if (err)
+		return err;
+	data.saddr = saddr;
+	data.daddr = daddr;
+	data.sport = sport;
+	data.dport = dport;
+	data.sisn = sisn;
+	data.disn = disn;
+	data.digestbits = htons(crypto_shash_digestsize(desc->tfm) * 8);
+
+	err = crypto_shash_update(desc, (u8*)&data, sizeof(data));
+	if (err)
+		goto out;
+	err = crypto_shash_final(desc, traffic_key);
+	if (err)
+		goto out;
 
 out:
 	tcp_authopt_put_kdf_shash(key, kdf_tfm);
@@ -1035,6 +1100,94 @@ int tcp_authopt_hash(char *hash_location,
 
 	return 0;
 }
+
+/**
+ * tcp_v4_authopt_hash_hdr - Hash tcp+ipv4 header without SKB
+ *
+ * The key must come from tcp_authopt_select_key.
+ */
+int tcp_v4_authopt_hash_reply(char *hash_location,
+			      struct tcp_authopt_info *info,
+			      struct tcp_authopt_key_info *key,
+			      __be32 saddr,
+			      __be32 daddr,
+			      struct tcphdr *th)
+{
+	struct crypto_shash *mac_tfm;
+	u8 macbuf[TCP_AUTHOPT_MAXMACBUF];
+	u8 traffic_key[TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN];
+	SHASH_DESC_ON_STACK(desc, tfm);
+	__be32 sne = 0;
+	int err;
+
+	/* Call special code path for computing traffic key without skb
+	 * This can be called from tcp_v4_reqsk_send_ack so caching would be
+	 * difficult here.
+	 */
+	err = tcp_v4_authopt_get_traffic_key_noskb(
+			key,
+			saddr,
+			daddr,
+			th->source,
+			th->dest,
+			htonl(info->src_isn),
+			htonl(info->dst_isn),
+			traffic_key);
+	if (err)
+		goto out_err_traffic_key;
+
+	/* Init mac shash */
+	mac_tfm = tcp_authopt_get_mac_shash(key);
+	if (IS_ERR(mac_tfm))
+		return PTR_ERR(mac_tfm);
+	if (WARN_ON_ONCE(crypto_shash_digestsize(mac_tfm) > TCP_AUTHOPT_MAXMACBUF)) {
+		err = -EINVAL;
+		goto out_err;
+	}
+	err = crypto_shash_setkey(mac_tfm, traffic_key, key->alg->traffic_key_len);
+	if (err)
+		goto out_err;
+
+	desc->tfm = mac_tfm;
+	err = crypto_shash_init(desc);
+	if (err)
+		return err;
+
+	err = crypto_shash_update(desc, (u8 *)&sne, 4);
+	if (err)
+		return err;
+
+	err = tcp_authopt_hash_tcp4_pseudoheader(desc, saddr, daddr, th->doff * 4);
+	if (err)
+		return err;
+
+	// TCP header with checksum set to zero. Caller ensures this.
+	if (WARN_ON_ONCE(th->check != 0))
+		goto out_err;
+	err = crypto_shash_update(desc, (u8 *)th, sizeof(*th));
+	if (err)
+		goto out_err;
+
+	// TCP options
+	err = tcp_authopt_hash_opts(desc, th, !(key->flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS));
+	if (err)
+		goto out_err;
+
+	err = crypto_shash_final(desc, macbuf);
+	if (err)
+		goto out_err;
+	memcpy(hash_location, macbuf, key->maclen);
+
+	tcp_authopt_put_mac_shash(key, mac_tfm);
+	return 0;
+
+out_err:
+	tcp_authopt_put_mac_shash(key, mac_tfm);
+out_err_traffic_key:
+	memset(hash_location, 0, key->maclen);
+	return err;
+}
+
 
 static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 							    struct sk_buff *skb,
