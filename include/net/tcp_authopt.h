@@ -13,8 +13,6 @@
 struct tcp_authopt_key_info {
 	struct hlist_node node;
 	struct rcu_head rcu;
-	/* Local identifier */
-	u32 local_id;
 	u32 flags;
 	/* Wire identifiers */
 	u8 send_id, recv_id;
