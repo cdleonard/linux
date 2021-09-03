@@ -399,8 +399,8 @@ struct tcp_authopt {
 /**
  * enum tcp_authopt_key_flag - flags for `tcp_authopt.flags`
  *
- * @TCP_AUTHOPT_KEY_DEL: Delete the key by local_id and ignore all other fields.
- * @TCP_AUTHOPT_KEY_EXCLUDE_OPTS: Exclude TCP options from signature.
+ * @TCP_AUTHOPT_KEY_DEL: Delete the key and ignore non-id fields
+ * @TCP_AUTHOPT_KEY_EXCLUDE_OPTS: Exclude TCP options from signature
  * @TCP_AUTHOPT_KEY_ADDR_BIND: Key only valid for `tcp_authopt.addr`
  */
 enum tcp_authopt_key_flag {
