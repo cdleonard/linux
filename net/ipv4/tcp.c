@@ -4232,14 +4232,17 @@ zerocopy_rcv_out:
 #ifdef CONFIG_TCP_AUTHOPT
 	case TCP_AUTHOPT: {
 		struct tcp_authopt info;
+		int err;
 
 		if (get_user(len, optlen))
 			return -EFAULT;
 
 		lock_sock(sk);
-		tcp_get_authopt_val(sk, &info);
+		err = tcp_get_authopt_val(sk, &info);
 		release_sock(sk);
 
+		if (err)
+			return err;
 		len = min_t(unsigned int, len, sizeof(info));
 		if (put_user(len, optlen))
 			return -EFAULT;
