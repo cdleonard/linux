@@ -111,7 +111,7 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	memset(opt, 0, sizeof(*opt));
 	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
-		return -EINVAL;
+		return -ENOENT;
 
 	opt->flags = info->flags & TCP_AUTHOPT_KNOWN_FLAGS;
 
