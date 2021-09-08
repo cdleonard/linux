@@ -918,15 +918,21 @@ static void tcp_v4_send_ack(const struct sock *sk,
 		if (WARN_ON_ONCE(key_info->maclen != 12))
 			goto no_authopt;
 		if (key_info) {
-			rep.opt[rep.th.doff] = htonl((TCPOPT_AUTHOPT << 24) |
-						     (16 << 16) |
-						     (key_info->send_id << 8) |
-						     (rnextkeyid));
-			/* FIXME: passing the original skb is extremely wrong here! */
-			pr_err("passing incorrect SKB to tcp_authopt_hash from tcp_v4_send_ack");
-			tcp_authopt_hash((char*)&rep.opt[rep.th.doff + 1], key_info, (struct sock*)sk, skb);
+			int offset = (arg.iov[0].iov_len - sizeof(rep.th)) / 4;
 			arg.iov[0].iov_len += 16;
 			rep.th.doff += 4;
+			rep.opt[offset] = htonl(
+					(TCPOPT_AUTHOPT << 24) |
+					(16 << 16) |
+					(key_info->send_id << 8) |
+					(rnextkeyid));
+			tcp_v4_authopt_hash_reply(
+					(char*)&rep.opt[offset + 1],
+					info,
+					key_info,
+					ip_hdr(skb)->daddr,
+					ip_hdr(skb)->saddr,
+					&rep.th);
 		}
 	}
 no_authopt:
