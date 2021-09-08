@@ -385,7 +385,7 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	if (err)
 		return err;
 
-	/* Addresses from packet on input and from socket on output
+	/* Addresses from packet on input and from sk_common on output
 	 * This is because on output MAC is computed before prepending IP header
 	 */
 	if (input) {
