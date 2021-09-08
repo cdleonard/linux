@@ -596,15 +596,20 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	} else {
 		struct tcp_authopt_info *authopt_info;
 
-		/* Fetching authopt_info like this means it's possible that authopt_info
-		 * was deleted while we were hashing. If that happens we drop the packet
-		 * which should be fine.
+		/* Fetching authopt_info like this should be safe because authopt_info
+		 * is never released unless the socket is being closed
 		 *
-		 * A better solution might be to always pass info as a parameter, or
-		 * compute traffic_key for established sockets separately.
+		 * tcp_timewait_sock is handled but not tcp_request_sock.
+		 * for the synack case sk should be the listen socket.
 		 */
 		rcu_read_lock();
-		authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		if (sk->sk_state == TCP_TIME_WAIT)
+			authopt_info = tcp_twsk(sk)->tw_authopt_info;
+		else if (unlikely(sk->sk_state == TCP_NEW_SYN_RECV))
+			/* should never happen */
+			authopt_info = NULL;
+		else
+			authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
 		if (!authopt_info) {
 			rcu_read_unlock();
 			return -EINVAL;
