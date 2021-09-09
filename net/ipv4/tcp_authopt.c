@@ -1099,7 +1099,6 @@ static int __tcp_authopt_calc_mac(struct sock *sk,
 				      ipv6,
 				      !(key->flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS),
 				      macbuf);
-	//printk("mac: %*phN\n", key->maclen, macbuf);
 
 out:
 	tcp_authopt_put_mac_shash(key, mac_tfm);
