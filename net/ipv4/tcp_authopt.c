@@ -605,10 +605,35 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 		rcu_read_lock();
 		if (sk->sk_state == TCP_TIME_WAIT)
 			authopt_info = tcp_twsk(sk)->tw_authopt_info;
-		else if (unlikely(sk->sk_state == TCP_NEW_SYN_RECV))
-			/* should never happen */
+		else if (unlikely(sk->sk_state == TCP_NEW_SYN_RECV)) {
+			/* should never happen, sk should be the listen socket */
 			authopt_info = NULL;
-		else
+			WARN_ONCE(1, "TCP-AO can't sign with request sock\n");
+		} else if (unlikely(sk->sk_state == TCP_LISTEN)) {
+			/* Signature computation for non-syn packet on a listen
+			 * socket is not possible because we have no valid
+			 * initial sequence numbers.
+			 *
+			 * Input segments that are not matched by any request,
+			 * established or timewait socket will get here. These
+			 * are not normally sent by peers.
+			 *
+			 * Their signature might be valid but don't have enough
+			 * state to determine that. TCP-MD5 can attempt to
+			 * validate and reply with a signed RST because it
+			 * doesn't care about ISNs.
+			 *
+			 * Reporting an error from signature code causes the
+			 * packet to be discarded which is good.
+			 */
+			authopt_info = NULL;
+			if (input) {
+				net_info_ratelimited("TCP-AO can't validate non-syn packet for TCP_LISTEN sock\n");
+			} else {
+				/* This would be an internal bug. */
+				WARN_ONCE(1, "TCP-AO can't sign non-syn from TCP_LISTEN sock\n");
+			}
+		} else
 			authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
 		if (!authopt_info) {
 			rcu_read_unlock();
