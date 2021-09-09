@@ -4,7 +4,6 @@
 #include <net/tcp.h>
 #include <net/tcp_authopt.h>
 #include <crypto/hash.h>
-#include <trace/events/tcp.h>
 
 /* This is enabled and disabled with struct tcp_authopt_info alloc/free */
 DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed);
