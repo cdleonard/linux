@@ -180,6 +180,53 @@ static bool tcp_authopt_key_match_exact(struct tcp_authopt_key_info *info,
 	return true;
 }
 
+static bool tcp_authopt_key_match_skb_addr(
+		struct tcp_authopt_key_info *key,
+		struct sk_buff *skb)
+{
+	u16 keyaf = key->addr.ss_family;
+	struct iphdr *iph = (struct iphdr *)skb_network_header(skb);
+
+	if (keyaf == AF_INET && iph->version == 4) {
+		struct sockaddr_in *key_addr = (struct sockaddr_in *)&key->addr;
+
+		return iph->saddr == key_addr->sin_addr.s_addr;
+	} else if (keyaf == AF_INET6 && iph->version == 6) {
+		struct ipv6hdr *ip6h = (struct ipv6hdr *)skb_network_header(skb);
+		struct sockaddr_in6 *key_addr = (struct sockaddr_in6 *)&key->addr;
+
+		return ipv6_addr_equal(&ip6h->saddr, &key_addr->sin6_addr);
+	} else {
+		/* This actually happens with ipv6-mapped-ipv4-addresses
+		 * IPv6 listen sockets will be asked to validate ipv4 packets.
+		 */
+		return false;
+	}
+}
+
+static bool tcp_authopt_key_match_sk_addr(
+		struct tcp_authopt_key_info *key,
+		const struct sock *addr_sk)
+{
+	u16 keyaf = key->addr.ss_family;
+
+	/* This probably can't happen even with ipv4-mapped-ipv6 */
+	if (keyaf != addr_sk->sk_family)
+		return false;
+
+	if (keyaf == AF_INET) {
+		struct sockaddr_in *key_addr = (struct sockaddr_in *)&key->addr;
+
+		return addr_sk->sk_daddr == key_addr->sin_addr.s_addr;
+	} else if (keyaf == AF_INET6) {
+		struct sockaddr_in6 *key_addr = (struct sockaddr_in6 *)&key->addr;
+
+		return ipv6_addr_equal(&addr_sk->sk_v6_daddr, &key_addr->sin6_addr);
+	}
+
+	return false;
+}
+
 static struct tcp_authopt_key_info *tcp_authopt_key_lookup_exact(const struct sock *sk,
 								 struct tcp_authopt_info *info,
 								 struct tcp_authopt_key *ukey)
@@ -203,24 +250,9 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct tcp_authopt_i
 	hlist_for_each_entry_rcu(key, &info->head, node, 0) {
 		if (send_id >= 0 && key->send_id != send_id)
 			continue;
-		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
-			if (addr_sk->sk_family == AF_INET) {
-				struct sockaddr_in *key_addr = (struct sockaddr_in *)&key->addr;
-
-				if (WARN_ON_ONCE(key_addr->sin_family != AF_INET))
-					continue;
-				if (addr_sk->sk_daddr != key_addr->sin_addr.s_addr)
-					continue;
-			}
-			if (addr_sk->sk_family == AF_INET6) {
-				struct sockaddr_in6 *key_addr = (struct sockaddr_in6 *)&key->addr;
-
-				if (WARN_ON_ONCE(key_addr->sin6_family != AF_INET6))
-					continue;
-				if (!ipv6_addr_equal(&addr_sk->sk_v6_daddr, &key_addr->sin6_addr))
-					continue;
-			}
-		}
+		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND)
+			if (!tcp_authopt_key_match_sk_addr(key, addr_sk))
+				continue;
 		if (result && net_ratelimit())
 			pr_warn("ambiguous tcp authentication keys configured for send\n");
 		result = key;
@@ -1224,7 +1256,6 @@ out_err_traffic_key:
 	return err;
 }
 
-
 static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 							    struct sk_buff *skb,
 							    struct tcp_authopt_info *info,
@@ -1237,30 +1268,9 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 	hlist_for_each_entry_rcu(key, &info->head, node, 0) {
 		if (recv_id >= 0 && key->recv_id != recv_id)
 			continue;
-		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND) {
-			if (sk->sk_family == AF_INET) {
-				struct sockaddr_in *key_addr = (struct sockaddr_in *)&key->addr;
-				struct iphdr *iph = (struct iphdr *)skb_network_header(skb);
-
-				if (WARN_ON_ONCE(key_addr->sin_family != AF_INET))
-					continue;
-				if (WARN_ON_ONCE(iph->version != 4))
-					continue;
-				if (iph->saddr != key_addr->sin_addr.s_addr)
-					continue;
-			}
-			if (sk->sk_family == AF_INET6) {
-				struct sockaddr_in6 *key_addr = (struct sockaddr_in6 *)&key->addr;
-				struct ipv6hdr *iph = (struct ipv6hdr *)skb_network_header(skb);
-
-				if (WARN_ON_ONCE(key_addr->sin6_family != AF_INET6))
-					continue;
-				if (WARN_ON_ONCE(iph->version != 6))
-					continue;
-				if (!ipv6_addr_equal(&iph->saddr, &key_addr->sin6_addr))
-					continue;
-			}
-		}
+		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND &&
+				!tcp_authopt_key_match_skb_addr(key, skb))
+			continue;
 		if (result && net_ratelimit())
 			pr_warn("ambiguous tcp authentication keys configured for receive\n");
 		result = key;
