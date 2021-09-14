@@ -658,6 +658,9 @@ EXPORT_SYMBOL(tcp_v4_send_check);
 
 #ifdef CONFIG_TCP_MD5SIG
 #define OPTION_BYTES TCPOLEN_MD5SIG_ALIGNED
+#elif defined(OPTION_BYTES_TCP_AUTHOPT)
+/* Assumes we only write RFC5926 */
+#define OPTION_BYTES 16
 #else
 #define OPTION_BYTES sizeof(__be32)
 #endif
@@ -711,8 +714,51 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 	arg.iov[0].iov_len  = sizeof(rep.th);
 
 	net = sk ? sock_net(sk) : dev_net(skb_dst(skb)->dev);
-#ifdef CONFIG_TCP_MD5SIG
+#if defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT)
 	rcu_read_lock();
+#endif
+#ifdef CONFIG_TCP_AUTHOPT
+	/* Unlike TCP-MD5 the signatures for TCP-AO depend on initial sequence
+	 * numbers so we can only handle established and time-wait sockets.
+	 *
+	 * FIXME: What about RST in response to SYN?
+	 */
+	if (static_branch_unlikely(&tcp_authopt_needed) && sk && sk->sk_state != TCP_NEW_SYN_RECV && sk->sk_state != TCP_LISTEN) {
+		struct tcp_authopt_info *info;
+		struct tcp_authopt_key_info *key_info;
+		u8 rnextkeyid;
+
+		if (sk->sk_state == TCP_TIME_WAIT)
+			info = tcp_twsk(sk)->tw_authopt_info;
+		else
+			info = tcp_sk(sk)->authopt_info;
+		if (!info)
+			goto no_authopt;
+		key_info = __tcp_authopt_select_key(sk, info, sk, &rnextkeyid);
+		if (WARN_ON_ONCE(key_info->maclen != 12))
+			goto no_authopt;
+		if (key_info) {
+			int offset = 0;
+			arg.iov[0].iov_len += 16;
+			rep.th.doff += 4;
+			rep.opt[offset] = htonl(
+					(TCPOPT_AUTHOPT << 24) |
+					(16 << 16) |
+					(key_info->send_id << 8) |
+					(rnextkeyid));
+			tcp_v4_authopt_hash_reply(
+					(char*)&rep.opt[offset + 1],
+					info,
+					key_info,
+					ip_hdr(skb)->daddr,
+					ip_hdr(skb)->saddr,
+					&rep.th);
+		}
+	}
+	/* FIXME: skip md5 if authopt applies */
+no_authopt:
+#endif
+#ifdef CONFIG_TCP_MD5SIG
 	hash_location = tcp_parse_md5sig_option(th);
 	if (sk && sk_fullsock(sk)) {
 		const union tcp_md5_addr *addr;
@@ -753,7 +799,6 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 		key = tcp_md5_do_lookup(sk1, l3index, addr, AF_INET);
 		if (!key)
 			goto out;
-
 
 		genhash = tcp_v4_md5_hash_skb(newhash, key, NULL, skb);
 		if (genhash || memcmp(hash_location, newhash, 16) != 0)
@@ -827,7 +872,7 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 	__TCP_INC_STATS(net, TCP_MIB_OUTRSTS);
 	local_bh_enable();
 
-#ifdef CONFIG_TCP_MD5SIG
+#if defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT)
 out:
 	rcu_read_unlock();
 #endif
@@ -849,8 +894,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 		__be32 opt[(TCPOLEN_TSTAMP_ALIGNED >> 2)
 #ifdef CONFIG_TCP_MD5SIG
 			   + (TCPOLEN_MD5SIG_ALIGNED >> 2)
-#endif
-#ifdef CONFIG_TCP_AUTHOPT
+#elif defined (CONFIG_TCP_AUTHOPT)
 			/* TCP-AO length is exactly 16 bytes for all supported algorithms */
 			   + (4)
 #endif
