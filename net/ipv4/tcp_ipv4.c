@@ -643,6 +643,48 @@ void tcp_v4_send_check(struct sock *sk, struct sk_buff *skb)
 }
 EXPORT_SYMBOL(tcp_v4_send_check);
 
+/** tcp_v4_authopt_handle_reply - Insert TCPOPT_AUTHOPT if required
+ *
+ * returns number of bytes (always aligned to 4) or zero
+ */
+static int tcp_v4_authopt_handle_reply(
+		const struct sock *sk,
+		struct sk_buff *skb,
+		__be32* optptr,
+		struct tcphdr *th)
+{
+	struct tcp_authopt_info *info;
+	struct tcp_authopt_key_info *key_info;
+	u8 rnextkeyid;
+
+	if (sk->sk_state == TCP_TIME_WAIT)
+		info = tcp_twsk(sk)->tw_authopt_info;
+	else
+		info = tcp_sk(sk)->authopt_info;
+	if (!info)
+		return 0;
+	key_info = __tcp_authopt_select_key(sk, info, sk, &rnextkeyid);
+	if (!key_info)
+		return 0;
+	if (WARN_ON_ONCE(key_info->maclen != 12))
+		return 0;
+	*optptr = htonl((TCPOPT_AUTHOPT << 24) |
+			(16 << 16) |
+			(key_info->send_id << 8) |
+			(rnextkeyid));
+	/* must update doff before signature computation */
+	th->doff += 4;
+	tcp_v4_authopt_hash_reply(
+			(char*)(optptr + 1),
+			info,
+			key_info,
+			ip_hdr(skb)->daddr,
+			ip_hdr(skb)->saddr,
+			th);
+
+	return 16;
+}
+
 /*
  *	This routine will send an RST to the other tcp.
  *
@@ -724,39 +766,12 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 	 * FIXME: What about RST in response to SYN?
 	 */
 	if (static_branch_unlikely(&tcp_authopt_needed) && sk && sk->sk_state != TCP_NEW_SYN_RECV && sk->sk_state != TCP_LISTEN) {
-		struct tcp_authopt_info *info;
-		struct tcp_authopt_key_info *key_info;
-		u8 rnextkeyid;
-
-		if (sk->sk_state == TCP_TIME_WAIT)
-			info = tcp_twsk(sk)->tw_authopt_info;
-		else
-			info = tcp_sk(sk)->authopt_info;
-		if (!info)
-			goto no_authopt;
-		key_info = __tcp_authopt_select_key(sk, info, sk, &rnextkeyid);
-		if (WARN_ON_ONCE(key_info->maclen != 12))
-			goto no_authopt;
-		if (key_info) {
-			int offset = 0;
-			arg.iov[0].iov_len += 16;
-			rep.th.doff += 4;
-			rep.opt[offset] = htonl(
-					(TCPOPT_AUTHOPT << 24) |
-					(16 << 16) |
-					(key_info->send_id << 8) |
-					(rnextkeyid));
-			tcp_v4_authopt_hash_reply(
-					(char*)&rep.opt[offset + 1],
-					info,
-					key_info,
-					ip_hdr(skb)->daddr,
-					ip_hdr(skb)->saddr,
-					&rep.th);
+		int tcp_authopt_ret = tcp_v4_authopt_handle_reply(sk, skb, rep.opt, &rep.th);
+		if (tcp_authopt_ret) {
+			arg.iov[0].iov_len += tcp_authopt_ret;
+			goto skip_md5sig;
 		}
 	}
-	/* FIXME: skip md5 if authopt applies */
-no_authopt:
 #endif
 #ifdef CONFIG_TCP_MD5SIG
 	hash_location = tcp_parse_md5sig_option(th);
@@ -820,6 +835,7 @@ no_authopt:
 				     ip_hdr(skb)->daddr, &rep.th);
 	}
 #endif
+skip_md5sig:
 	/* Can't co-exist with TCPMD5, hence check rep.opt[0] */
 	if (rep.opt[0] == 0) {
 		__be32 mrst = mptcp_reset_option(skb);
@@ -928,6 +944,18 @@ static void tcp_v4_send_ack(const struct sock *sk,
 	rep.th.ack     = 1;
 	rep.th.window  = htons(win);
 
+#ifdef CONFIG_TCP_AUTHOPT
+	if (static_branch_unlikely(&tcp_authopt_needed))
+	{
+		int offset = (tsecr) ? 3 : 0;
+
+		int tcp_authopt_ret = tcp_v4_authopt_handle_reply(sk, skb, &rep.opt[offset], &rep.th);
+		if (tcp_authopt_ret) {
+			arg.iov[0].iov_len += tcp_authopt_ret;
+			goto skip_md5sig;
+		}
+	}
+#endif
 #ifdef CONFIG_TCP_MD5SIG
 	if (key) {
 		int offset = (tsecr) ? 3 : 0;
@@ -944,43 +972,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 				    ip_hdr(skb)->daddr, &rep.th);
 	}
 #endif
-#ifdef CONFIG_TCP_AUTHOPT
-	if (static_branch_unlikely(&tcp_authopt_needed))
-	{
-		struct tcp_authopt_info *info;
-		struct tcp_authopt_key_info *key_info;
-		u8 rnextkeyid;
-
-		if (sk->sk_state == TCP_TIME_WAIT)
-			info = tcp_twsk(sk)->tw_authopt_info;
-		else
-			info = tcp_sk(sk)->authopt_info;
-
-		if (!info)
-			goto no_authopt;
-		key_info = __tcp_authopt_select_key(sk, info, sk, &rnextkeyid);
-		if (WARN_ON_ONCE(key_info->maclen != 12))
-			goto no_authopt;
-		if (key_info) {
-			int offset = (arg.iov[0].iov_len - sizeof(rep.th)) / 4;
-			arg.iov[0].iov_len += 16;
-			rep.th.doff += 4;
-			rep.opt[offset] = htonl(
-					(TCPOPT_AUTHOPT << 24) |
-					(16 << 16) |
-					(key_info->send_id << 8) |
-					(rnextkeyid));
-			tcp_v4_authopt_hash_reply(
-					(char*)&rep.opt[offset + 1],
-					info,
-					key_info,
-					ip_hdr(skb)->daddr,
-					ip_hdr(skb)->saddr,
-					&rep.th);
-		}
-	}
-no_authopt:
-#endif
+skip_md5sig:
 	arg.flags = reply_flags;
 	arg.csum = csum_tcpudp_nofold(ip_hdr(skb)->daddr,
 				      ip_hdr(skb)->saddr, /* XXX */
