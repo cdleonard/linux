@@ -93,6 +93,11 @@ int __tcp_authopt_inbound_check(
 		struct sock *sk,
 		struct sk_buff *skb,
 		struct tcp_authopt_info *info);
+/** tcp_authopt_inbound_check - check for valid TCP-AO signature.
+ *
+ * Return negative ERRNO on error, 0 if not present and 1 if present and valid
+ * If both TCP-AO and MD5 signatures are found this is reported as an error.
+ */
 static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
