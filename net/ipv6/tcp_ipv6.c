@@ -908,7 +908,7 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 		tot_len += TCPOLEN_TSTAMP_ALIGNED;
 #ifdef CONFIG_TCP_AUTHOPT
 	/* Key lookup before SKB allocation */
-	if (static_branch_unlikely(&tcp_authopt_needed))
+	if (static_branch_unlikely(&tcp_authopt_needed) && sk)
 	{
 		if (sk->sk_state == TCP_TIME_WAIT)
 			authopt_info = tcp_twsk(sk)->tw_authopt_info;
