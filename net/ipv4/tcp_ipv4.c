@@ -700,14 +700,11 @@ static int tcp_v4_authopt_handle_reply(
 
 #ifdef CONFIG_TCP_MD5SIG
 #define OPTION_BYTES TCPOLEN_MD5SIG_ALIGNED
+#elif defined(OPTION_BYTES_TCP_AUTHOPT)
+/* Assumes we only write RFC5926 */
+#define OPTION_BYTES 16
 #else
 #define OPTION_BYTES sizeof(__be32)
-#endif
-/* This is actually excessive because combining MD5 and AO is not allowed */
-#ifdef CONFIG_TCP_AUTHOPT
-#define OPTION_BYTES_TCP_AUTHOPT 16
-#else
-#define OPTION_BYTES_TCP_AUTHOPT 0
 #endif
 
 static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
@@ -715,7 +712,7 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 	const struct tcphdr *th = tcp_hdr(skb);
 	struct {
 		struct tcphdr th;
-		__be32 opt[(OPTION_BYTES + OPTION_BYTES_TCP_AUTHOPT) / sizeof(__be32)];
+		__be32 opt[OPTION_BYTES / sizeof(__be32)];
 	} rep;
 	struct ip_reply_arg arg;
 #ifdef CONFIG_TCP_MD5SIG
@@ -913,8 +910,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 		__be32 opt[(TCPOLEN_TSTAMP_ALIGNED >> 2)
 #ifdef CONFIG_TCP_MD5SIG
 			   + (TCPOLEN_MD5SIG_ALIGNED >> 2)
-#endif
-#ifdef CONFIG_TCP_AUTHOPT
+#elif defined (CONFIG_TCP_AUTHOPT)
 			/* TCP-AO length is exactly 16 bytes for all supported algorithms */
 			   + (4)
 #endif
