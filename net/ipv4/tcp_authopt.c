@@ -659,7 +659,13 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 			 */
 			authopt_info = NULL;
 			if (input) {
-				net_info_ratelimited("TCP-AO can't validate non-syn packet for TCP_LISTEN sock\n");
+				/* Assume this is an ACK to a SYN/ACK */
+				sisn = htonl(ntohl(th->seq) - 1);
+				disn = htonl(ntohl(th->ack) - 1);
+				//net_info_ratelimited("TCP-AO can't validate non-syn packet for TCP_LISTEN sock\n");
+				net_info_ratelimited("TCP-AO: assume non-syn packet for TCP_LISTEN is ACK to SYN/ACK\n");
+				rcu_read_unlock();
+				goto found_isn;
 			} else {
 				/* This would be an internal bug. */
 				WARN_ONCE(1, "TCP-AO can't sign non-syn from TCP_LISTEN sock\n");
@@ -680,7 +686,9 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 		}
 		rcu_read_unlock();
 	}
+found_isn:
 
+	pr_err("input=%d sport=%hu dport=%hu sisn=%08x disn=%08x\n", input, th->source, th->dest, sisn, disn);
 	err = crypto_shash_update(desc, (u8 *)&sisn, 4);
 	if (err)
 		return err;
