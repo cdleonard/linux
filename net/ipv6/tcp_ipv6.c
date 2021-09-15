@@ -906,19 +906,6 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 
 	if (tsecr)
 		tot_len += TCPOLEN_TSTAMP_ALIGNED;
-#ifdef CONFIG_TCP_MD5SIG
-	if (key)
-		tot_len += TCPOLEN_MD5SIG_ALIGNED;
-#endif
-
-#ifdef CONFIG_MPTCP
-	if (rst && !key) {
-		mrst = mptcp_reset_option(skb);
-
-		if (mrst)
-			tot_len += sizeof(__be32);
-	}
-#endif
 #ifdef CONFIG_TCP_AUTHOPT
 	/* Key lookup before SKB allocation */
 	if (static_branch_unlikely(&tcp_authopt_needed) && sk)
@@ -932,9 +919,24 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 			authopt_key_info = __tcp_authopt_select_key(sk, authopt_info, sk, &authopt_rnextkeyid);
 			if (WARN_ON_ONCE(authopt_key_info->maclen != 12))
 				authopt_key_info = NULL;
-			else
+			else {
 				tot_len += 16;
+				/* Don't use MD5 */
+				key = NULL;
+			}
 		}
+	}
+#endif
+#ifdef CONFIG_TCP_MD5SIG
+	if (key)
+		tot_len += TCPOLEN_MD5SIG_ALIGNED;
+#endif
+#ifdef CONFIG_MPTCP
+	if (rst && !key) {
+		mrst = mptcp_reset_option(skb);
+
+		if (mrst)
+			tot_len += sizeof(__be32);
 	}
 #endif
 
