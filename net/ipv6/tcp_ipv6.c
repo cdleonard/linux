@@ -1722,7 +1722,8 @@ process:
 		struct sock *nsk;
 
 		sk = req->rsk_listener;
-		if (tcp_v6_auth_inbound_check(sk, skb, dif, sdif)) {
+		//if (tcp_v6_auth_inbound_check(sk, skb, dif, sdif)) {
+		if (tcp_v6_inbound_md5_hash(sk, skb, dif, sdif)) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
 			goto discard_it;
