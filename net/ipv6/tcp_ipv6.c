@@ -1654,8 +1654,8 @@ static void tcp_v6_fill_cb(struct sk_buff *skb, const struct ipv6hdr *hdr,
 }
 
 static int tcp_v6_auth_inbound_check(
-		const struct sock *sk,
-		const struct sk_buff *skb,
+		struct sock *sk,
+		struct sk_buff *skb,
 		int dif, int sdif)
 {
 	int aoret;
