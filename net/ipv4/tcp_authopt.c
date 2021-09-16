@@ -661,7 +661,7 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 			if (input) {
 				/* Assume this is an ACK to a SYN/ACK */
 				sisn = htonl(ntohl(th->seq) - 1);
-				disn = htonl(ntohl(th->ack) - 1);
+				disn = htonl(ntohl(th->ack_seq) - 1);
 				//net_info_ratelimited("TCP-AO can't validate non-syn packet for TCP_LISTEN sock\n");
 				net_info_ratelimited("TCP-AO: assume non-syn packet for TCP_LISTEN is ACK to SYN/ACK\n");
 				rcu_read_unlock();
