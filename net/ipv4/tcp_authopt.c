@@ -91,13 +91,13 @@ static int __tcp_authopt_alg_init(struct tcp_authopt_alg_imp *alg)
 		}
 
 		/* sanity checks: */
-		if (WARN_ON_ONCE(crypto_shash_digestsize(tfm) != key->alg->traffic_key_len)) {
+		if (WARN_ON_ONCE(crypto_shash_digestsize(tfm) != alg->traffic_key_len)) {
 			err = -EINVAL;
-			goto out;
+			goto out_err;
 		}
-		if (WARN_ON_ONE(crypto_shash_digestsize(tfm) > TCP_AUTHOPT_MAXMACBUF)) {
+		if (WARN_ON_ONCE(crypto_shash_digestsize(tfm) > TCP_AUTHOPT_MAXMACBUF)) {
 			err = -EINVAL;
-			goto out;
+			goto out_err;
 		}
 
 		*per_cpu_ptr(alg->tfms, cpu) = tfm;
