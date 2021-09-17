@@ -11,8 +11,9 @@ DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed);
 EXPORT_SYMBOL(tcp_authopt_needed);
 
 /* All current algorithms have a mac length of 12 but crypto API digestsize can be larger */
-#define TCP_AUTHOPT_MAXMACBUF	20
-#define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN	20
+#define TCP_AUTHOPT_MAXMACBUF			20
+#define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN		20
+#define TCP_AUTHOPT_MACLEN			12
 
 struct tcp_authopt_alg_imp {
 	/* Name of algorithm in crypto-api */
@@ -21,8 +22,6 @@ struct tcp_authopt_alg_imp {
 	u8 alg_id;
 	/* Length of traffic key */
 	u8 traffic_key_len;
-	/* Length of mac in TCP option */
-	u8 maclen;
 
 	/* shared crypto_shash */
 	struct mutex init_mutex;
@@ -35,14 +34,12 @@ static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
 		.alg_id = TCP_AUTHOPT_ALG_HMAC_SHA_1_96,
 		.alg_name = "hmac(sha1)",
 		.traffic_key_len = 20,
-		.maclen = 12,
 		.init_mutex = __MUTEX_INITIALIZER(tcp_authopt_alg_list[0].init_mutex),
 	},
 	{
 		.alg_id = TCP_AUTHOPT_ALG_AES_128_CMAC_96,
 		.alg_name = "cmac(aes)",
 		.traffic_key_len = 16,
-		.maclen = 12,
 		.init_mutex = __MUTEX_INITIALIZER(tcp_authopt_alg_list[1].init_mutex),
 	},
 };
@@ -503,7 +500,6 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	key_info->alg = alg;
 	key_info->keylen = opt.keylen;
 	memcpy(key_info->key, opt.key, opt.keylen);
-	key_info->maclen = alg->maclen;
 	memcpy(&key_info->addr, &opt.addr, sizeof(key_info->addr));
 	hlist_add_head_rcu(&key_info->node, &info->head);
 
@@ -1153,18 +1149,17 @@ int tcp_authopt_hash(char *hash_location,
 	u8 macbuf[TCP_AUTHOPT_MAXMACBUF];
 	int err;
 
-	if (WARN_ON(key->maclen > sizeof(macbuf)))
-		return -ENOBUFS;
+	BUILD_BUG_ON(TCP_AUTHOPT_MAXMACBUF < TCPOLEN_AUTHOPT_OUTPUT);
 
 	err = __tcp_authopt_calc_mac(sk, skb, key, false, macbuf);
 	if (err) {
 		/* If mac calculation fails and caller doesn't handle the error
 		 * try to make it obvious inside the packet.
 		 */
-		memset(hash_location, 0, key->maclen);
+		memset(hash_location, 0, TCP_AUTHOPT_MACLEN);
 		return err;
 	}
-	memcpy(hash_location, macbuf, key->maclen);
+	memcpy(hash_location, macbuf, TCP_AUTHOPT_MACLEN);
 
 	return 0;
 }
@@ -1244,7 +1239,7 @@ int tcp_v4_authopt_hash_reply(char *hash_location,
 	err = crypto_shash_final(desc, macbuf);
 	if (err)
 		goto out_err;
-	memcpy(hash_location, macbuf, key->maclen);
+	memcpy(hash_location, macbuf, TCP_AUTHOPT_MACLEN);
 
 	tcp_authopt_put_mac_shash(key, mac_tfm);
 	return 0;
@@ -1252,7 +1247,7 @@ int tcp_v4_authopt_hash_reply(char *hash_location,
 out_err:
 	tcp_authopt_put_mac_shash(key, mac_tfm);
 out_err_traffic_key:
-	memset(hash_location, 0, key->maclen);
+	memset(hash_location, 0, TCP_AUTHOPT_MACLEN);
 	return err;
 }
 
@@ -1324,14 +1319,14 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	}
 
 	/* bad inbound key len */
-	if (key->maclen + 4 != opt->len)
+	if (TCPOLEN_AUTHOPT_OUTPUT != opt->len)
 		return -EINVAL;
 
 	err = __tcp_authopt_calc_mac(sk, skb, key, true, macbuf);
 	if (err)
 		return err;
 
-	if (memcmp(macbuf, opt->mac, key->maclen)) {
+	if (memcmp(macbuf, opt->mac, TCP_AUTHOPT_MACLEN)) {
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		net_info_ratelimited("TCP Authentication Failed\n");
 		return -EINVAL;
