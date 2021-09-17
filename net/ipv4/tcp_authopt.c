@@ -413,7 +413,6 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	key_info->alg = alg;
 	key_info->keylen = opt.keylen;
 	memcpy(key_info->key, opt.key, opt.keylen);
-	key_info->maclen = alg->maclen;
 	memcpy(&key_info->addr, &opt.addr, sizeof(key_info->addr));
 	hlist_add_head_rcu(&key_info->node, &info->head);
 
@@ -960,18 +959,15 @@ int tcp_authopt_hash(char *hash_location,
 	u8 macbuf[TCP_AUTHOPT_MAXMACBUF];
 	int err;
 
-	if (WARN_ON(key->maclen > sizeof(macbuf)))
-		return -ENOBUFS;
-
 	err = __tcp_authopt_calc_mac(sk, skb, key, false, macbuf);
 	if (err) {
 		/* If mac calculation fails and caller doesn't handle the error
 		 * try to make it obvious inside the packet.
 		 */
-		memset(hash_location, 0, key->maclen);
+		memset(hash_location, 0, TCP_AUTHOPT_MACLEN);
 		return err;
 	}
-	memcpy(hash_location, macbuf, key->maclen);
+	memcpy(hash_location, macbuf, TCP_AUTHOPT_MACLEN);
 
 	return 0;
 }
@@ -1055,14 +1051,14 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	}
 
 	/* bad inbound key len */
-	if (key->maclen + 4 != opt->len)
+	if (TCPOLEN_AUTHOPT_OUTPUT != opt->len)
 		return -EINVAL;
 
 	err = __tcp_authopt_calc_mac(sk, skb, key, true, macbuf);
 	if (err)
 		return err;
 
-	if (memcmp(macbuf, opt->mac, key->maclen)) {
+	if (memcmp(macbuf, opt->mac, TCP_AUTHOPT_MACLEN)) {
 		net_info_ratelimited("TCP Authentication Failed\n");
 		return -EINVAL;
 	}

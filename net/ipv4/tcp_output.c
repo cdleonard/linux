@@ -631,12 +631,13 @@ static void tcp_options_write(__be32 *ptr, struct tcp_sock *tp,
 		struct tcp_authopt_key_info *key = opts->authopt_key;
 
 		WARN_ON(!key);
-		*ptr++ = htonl((TCPOPT_AUTHOPT << 24) | ((4 + key->maclen) << 16) |
-			       (key->send_id << 8) | opts->authopt_rnextkeyid);
+		*ptr = htonl((TCPOPT_AUTHOPT << 24) |
+			     (TCPOLEN_AUTHOPT_OUTPUT << 16) |
+			     (key->send_id << 8) |
+			     opts->authopt_rnextkeyid);
 		/* overload cookie hash location */
-		opts->hash_location = (__u8 *)ptr;
-		/* maclen is currently always 12 but try to align nicely anyway. */
-		ptr += (key->maclen + 3) / 4;
+		opts->hash_location = (__u8 *)(ptr + 1);
+		ptr += TCPOLEN_AUTHOPT_OUTPUT / 4;
 	}
 #endif
 
@@ -786,7 +787,7 @@ static int tcp_authopt_init_options(const struct sock *sk,
 	if (key) {
 		opts->options |= OPTION_AUTHOPT;
 		opts->authopt_key = key;
-		return 4 + key->maclen;
+		return TCPOLEN_AUTHOPT_OUTPUT;
 	}
 #endif
 
