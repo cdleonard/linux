@@ -6,8 +6,9 @@
 #include <crypto/hash.h>
 
 /* All current algorithms have a mac length of 12 but crypto API digestsize can be larger */
-#define TCP_AUTHOPT_MAXMACBUF	20
-#define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN	20
+#define TCP_AUTHOPT_MAXMACBUF			20
+#define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN		20
+#define TCP_AUTHOPT_MACLEN			12
 
 struct tcp_authopt_alg_imp {
 	/* Name of algorithm in crypto-api */
@@ -16,8 +17,6 @@ struct tcp_authopt_alg_imp {
 	u8 alg_id;
 	/* Length of traffic key */
 	u8 traffic_key_len;
-	/* Length of mac in TCP option */
-	u8 maclen;
 
 	/* shared crypto_shash */
 	struct mutex init_mutex;
@@ -30,14 +29,12 @@ static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
 		.alg_id = TCP_AUTHOPT_ALG_HMAC_SHA_1_96,
 		.alg_name = "hmac(sha1)",
 		.traffic_key_len = 20,
-		.maclen = 12,
 		.init_mutex = __MUTEX_INITIALIZER(tcp_authopt_alg_list[0].init_mutex),
 	},
 	{
 		.alg_id = TCP_AUTHOPT_ALG_AES_128_CMAC_96,
 		.alg_name = "cmac(aes)",
 		.traffic_key_len = 16,
-		.maclen = 12,
 		.init_mutex = __MUTEX_INITIALIZER(tcp_authopt_alg_list[1].init_mutex),
 	},
 };
@@ -73,6 +70,7 @@ static int __tcp_authopt_alg_init(struct tcp_authopt_alg_imp *alg)
 	struct crypto_shash *tfm;
 	int cpu;
 
+	BUILD_BUG_ON(TCP_AUTHOPT_MAXMACBUF < TCPOLEN_AUTHOPT_OUTPUT);
 	alg->tfms = alloc_percpu(struct crypto_shash*);
 	if (!alg->tfms)
 		return -ENOMEM;
