@@ -1308,7 +1308,8 @@ int tcp_v4_authopt_hash_reply(char *hash_location,
 		goto out_err;
 
 	// TCP options
-	err = tcp_authopt_hash_opts(desc, th, !(key->flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS));
+	err = tcp_authopt_hash_opts(desc, th, (struct tcphdr_authopt *)(hash_location - 4),
+				    !(key->flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS));
 	if (err)
 		goto out_err;
 
