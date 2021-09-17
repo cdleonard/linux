@@ -413,12 +413,14 @@ static void tcp_authopt_key_del(struct sock *sk,
 	hlist_del_rcu(&key->node);
 	if (info->send_key == key)
 		info->send_key = NULL;
-	atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
+	/* missing on timewait case: */
+	if (sk)
+		atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
 	kfree_rcu(key, rcu);
 }
 
 /* free info and keys but don't touch tp->authopt_info */
-static void __tcp_authopt_info_free(struct sock *sk, struct tcp_authopt_info *info)
+void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info)
 {
 	struct hlist_node *n;
 	struct tcp_authopt_key_info *key;
@@ -435,7 +437,7 @@ void tcp_authopt_clear(struct sock *sk)
 
 	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
 	if (info) {
-		__tcp_authopt_info_free(sk, info);
+		tcp_authopt_free(sk, info);
 		tcp_sk(sk)->authopt_info = NULL;
 	}
 }
@@ -570,7 +572,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	INIT_HLIST_HEAD(&new_info->head);
 	err = tcp_authopt_clone_keys(newsk, oldsk, new_info, old_info);
 	if (err) {
-		__tcp_authopt_info_free(newsk, new_info);
+		tcp_authopt_free(newsk, new_info);
 		return err;
 	}
 	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
