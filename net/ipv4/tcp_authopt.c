@@ -445,15 +445,52 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	} else {
 		struct tcp_authopt_info *authopt_info;
 
-		/* Fetching authopt_info like this means it's possible that authopt_info
-		 * was deleted while we were hashing. If that happens we drop the packet
-		 * which should be fine.
+		/* Fetching authopt_info like this should be safe because authopt_info
+		 * is never released unless the socket is being closed
 		 *
-		 * A better solution might be to always pass info as a parameter, or
-		 * compute traffic_key for established sockets separately.
+		 * tcp_timewait_sock is handled but not tcp_request_sock.
+		 * for the synack case sk should be the listen socket.
 		 */
 		rcu_read_lock();
-		authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		if (sk->sk_state == TCP_TIME_WAIT)
+			authopt_info = tcp_twsk(sk)->tw_authopt_info;
+		else if (unlikely(sk->sk_state == TCP_NEW_SYN_RECV)) {
+			/* should never happen, sk should be the listen socket */
+			authopt_info = NULL;
+			WARN_ONCE(1, "TCP-AO can't sign with request sock\n");
+		} else if (sk->sk_state == TCP_LISTEN) {
+			/* Signature computation for non-syn packet on a listen
+			 * socket is not possible because we lack the initial
+			 * sequence numbers.
+			 *
+			 * Input segments that are not matched by any request,
+			 * established or timewait socket will get here. These
+			 * are not normally sent by peers.
+			 *
+			 * Their signature might be valid but we don't have
+			 * enough state to determine that. TCP-MD5 can attempt
+			 * to validate and reply with a signed RST because it
+			 * doesn't care about ISNs.
+			 *
+			 * Reporting an error from signature code causes the
+			 * packet to be discarded which is good.
+			 */
+			if (input) {
+				/* Assume this is an ACK to a SYN/ACK
+				 * This will incorrectly report "failed
+				 * signature" for segments without a connection.
+				 */
+				sisn = htonl(ntohl(th->seq) - 1);
+				disn = htonl(ntohl(th->ack_seq) - 1);
+				rcu_read_unlock();
+				goto found_isn;
+			} else {
+				/* This would be an internal bug. */
+				authopt_info = NULL;
+				WARN_ONCE(1, "TCP-AO can't sign non-syn from TCP_LISTEN sock\n");
+			}
+		} else
+			authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
 		if (!authopt_info) {
 			rcu_read_unlock();
 			return -EINVAL;
@@ -468,6 +505,7 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 		}
 		rcu_read_unlock();
 	}
+found_isn:
 
 	err = crypto_shash_update(desc, (u8 *)&sisn, 4);
 	if (err)
