@@ -55,6 +55,7 @@ struct tcp_authopt_info {
 #ifdef CONFIG_TCP_AUTHOPT
 DECLARE_STATIC_KEY_FALSE(tcp_authopt_needed);
 
+void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info);
 void tcp_authopt_clear(struct sock *sk);
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
 int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key);
@@ -92,6 +93,21 @@ static inline int tcp_authopt_openreq(
 	else
 		return __tcp_authopt_openreq(newsk, oldsk, req);
 }
+static inline void tcp_authopt_time_wait(
+		struct tcp_timewait_sock *tcptw,
+		struct tcp_sock *tp)
+{
+	if (static_branch_unlikely(&tcp_authopt_needed)) {
+		/* Transfer ownership of authopt_info to the twsk
+		 * This requires no other users of the origin sock.
+		 */
+		sock_owned_by_me((struct sock *)tp);
+		tcptw->tw_authopt_info = tp->authopt_info;
+		tp->authopt_info = NULL;
+	} else {
+		tcptw->tw_authopt_info = NULL;
+	}
+}
 int __tcp_authopt_inbound_check(
 		struct sock *sk,
 		struct sk_buff *skb,
@@ -121,6 +137,9 @@ static inline int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key)
 {
 	return -ENOPROTOOPT;
 }
+static inline void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info)
+{
+}
 static inline void tcp_authopt_clear(struct sock *sk)
 {
 }
@@ -147,6 +166,11 @@ static inline int tcp_authopt_openreq(struct sock *newsk,
 				      struct request_sock *req)
 {
 	return 0;
+}
+static inline void tcp_authopt_time_wait(
+		struct tcp_timewait_sock *tcptw,
+		struct tcp_sock *tp);
+{
 }
 static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb)
 {
