@@ -534,6 +534,91 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	return 0;
 }
 
+static int tcp_authopt_get_isn(struct sock *sk,
+			       struct sk_buff *skb,
+			       int input,
+			       __be32 *sisn,
+			       __be32 *disn)
+{
+	struct tcp_authopt_info *authopt_info;
+	struct tcphdr *th = tcp_hdr(skb);
+
+	/* special cases for SYN and SYN/ACK */
+	if (th->syn && !th->ack) {
+		*sisn = th->seq;
+		*disn = 0;
+		return 0;
+	}
+	if (th->syn && th->ack) {
+		*sisn = th->seq;
+		*disn = htonl(ntohl(th->ack_seq) - 1);
+		return 0;
+	}
+
+	/* Fetching authopt_info like this should be safe because authopt_info
+	 * is never released intil the socket is being closed
+	 *
+	 * tcp_timewait_sock is handled but not tcp_request_sock.
+	 * for the synack case sk should be the listen socket.
+	 */
+	rcu_read_lock();
+	if (sk->sk_state == TCP_TIME_WAIT)
+		authopt_info = tcp_twsk(sk)->tw_authopt_info;
+	else if (unlikely(sk->sk_state == TCP_NEW_SYN_RECV)) {
+		/* should never happen, sk should be the listen socket */
+		authopt_info = NULL;
+		WARN_ONCE(1, "TCP-AO can't sign with request sock\n");
+		return -EINVAL;
+	} else if (sk->sk_state == TCP_LISTEN) {
+		/* Signature computation for non-syn packet on a listen
+		 * socket is not possible because we lack the initial
+		 * sequence numbers.
+		 *
+		 * Input segments that are not matched by any request,
+		 * established or timewait socket will get here. These
+		 * are not normally sent by peers.
+		 *
+		 * Their signature might be valid but we don't have
+		 * enough state to determine that. TCP-MD5 can attempt
+		 * to validate and reply with a signed RST because it
+		 * doesn't care about ISNs.
+		 *
+		 * Reporting an error from signature code causes the
+		 * packet to be discarded which is good.
+		 */
+		if (input) {
+			/* Assume this is an ACK to a SYN/ACK
+			 * This will incorrectly report "failed
+			 * signature" for segments without a connection.
+			 */
+			*sisn = htonl(ntohl(th->seq) - 1);
+			*disn = htonl(ntohl(th->ack_seq) - 1);
+			rcu_read_unlock();
+			return 0;
+		} else {
+			/* This would be an internal bug. */
+			authopt_info = NULL;
+			WARN_ONCE(1, "TCP-AO can't sign non-syn from TCP_LISTEN sock\n");
+			return -EINVAL;
+		}
+	} else
+		authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
+	if (!authopt_info) {
+		rcu_read_unlock();
+		return -EINVAL;
+	}
+	/* Initial sequence numbers for ESTABLISHED connections from info */
+	if (input) {
+		*sisn = htonl(authopt_info->dst_isn);
+		*disn = htonl(authopt_info->src_isn);
+	} else {
+		*sisn = htonl(authopt_info->src_isn);
+		*disn = htonl(authopt_info->dst_isn);
+	}
+	rcu_read_unlock();
+	return 0;
+}
+
 /* feed traffic key into shash */
 static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 					 struct sock *sk,
@@ -583,86 +668,15 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	err = crypto_shash_update(desc, (u8 *)&th->source, 4);
 	if (err)
 		return err;
-
-	/* special cases for SYN and SYN/ACK */
-	if (th->syn && !th->ack) {
-		sisn = th->seq;
-		disn = 0;
-	} else if (th->syn && th->ack) {
-		sisn = th->seq;
-		disn = htonl(ntohl(th->ack_seq) - 1);
-	} else {
-		struct tcp_authopt_info *authopt_info;
-
-		/* Fetching authopt_info like this should be safe because authopt_info
-		 * is never released unless the socket is being closed
-		 *
-		 * tcp_timewait_sock is handled but not tcp_request_sock.
-		 * for the synack case sk should be the listen socket.
-		 */
-		rcu_read_lock();
-		if (sk->sk_state == TCP_TIME_WAIT)
-			authopt_info = tcp_twsk(sk)->tw_authopt_info;
-		else if (unlikely(sk->sk_state == TCP_NEW_SYN_RECV)) {
-			/* should never happen, sk should be the listen socket */
-			authopt_info = NULL;
-			WARN_ONCE(1, "TCP-AO can't sign with request sock\n");
-		} else if (sk->sk_state == TCP_LISTEN) {
-			/* Signature computation for non-syn packet on a listen
-			 * socket is not possible because we lack the initial
-			 * sequence numbers.
-			 *
-			 * Input segments that are not matched by any request,
-			 * established or timewait socket will get here. These
-			 * are not normally sent by peers.
-			 *
-			 * Their signature might be valid but we don't have
-			 * enough state to determine that. TCP-MD5 can attempt
-			 * to validate and reply with a signed RST because it
-			 * doesn't care about ISNs.
-			 *
-			 * Reporting an error from signature code causes the
-			 * packet to be discarded which is good.
-			 */
-			if (input) {
-				/* Assume this is an ACK to a SYN/ACK
-				 * This will incorrectly report "failed
-				 * signature" for segments without a connection.
-				 */
-				sisn = htonl(ntohl(th->seq) - 1);
-				disn = htonl(ntohl(th->ack_seq) - 1);
-				rcu_read_unlock();
-				goto found_isn;
-			} else {
-				/* This would be an internal bug. */
-				authopt_info = NULL;
-				WARN_ONCE(1, "TCP-AO can't sign non-syn from TCP_LISTEN sock\n");
-			}
-		} else
-			authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
-		if (!authopt_info) {
-			rcu_read_unlock();
-			return -EINVAL;
-		}
-		/* Initial sequence numbers for ESTABLISHED connections from info */
-		if (input) {
-			sisn = htonl(authopt_info->dst_isn);
-			disn = htonl(authopt_info->src_isn);
-		} else {
-			sisn = htonl(authopt_info->src_isn);
-			disn = htonl(authopt_info->dst_isn);
-		}
-		rcu_read_unlock();
-	}
-found_isn:
-
+	err = tcp_authopt_get_isn(sk, skb, input, &sisn, &disn);
+	if (err)
+		return err;
 	err = crypto_shash_update(desc, (u8 *)&sisn, 4);
 	if (err)
 		return err;
 	err = crypto_shash_update(desc, (u8 *)&disn, 4);
 	if (err)
 		return err;
-
 	err = crypto_shash_update(desc, (u8 *)&digestbits, 2);
 	if (err)
 		return err;
