@@ -299,6 +299,7 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(
 {
 	return tcp_authopt_lookup_send(info, addr_sk, -1);
 }
+EXPORT_SYMBOL(__tcp_authopt_select_key);
 
 static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk)
 {
@@ -1122,6 +1123,7 @@ int tcp_authopt_hash(char *hash_location,
 
 	return 0;
 }
+EXPORT_SYMBOL(tcp_authopt_hash);
 
 static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 							    struct sk_buff *skb,
