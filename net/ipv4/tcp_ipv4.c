@@ -666,14 +666,12 @@ static int tcp_v4_authopt_handle_reply(
 	key_info = __tcp_authopt_select_key(sk, info, sk, &rnextkeyid);
 	if (!key_info)
 		return 0;
-	if (WARN_ON_ONCE(key_info->maclen != 12))
-		return 0;
 	*optptr = htonl((TCPOPT_AUTHOPT << 24) |
-			(16 << 16) |
+			(TCPOLEN_AUTHOPT_OUTPUT << 16) |
 			(key_info->send_id << 8) |
 			(rnextkeyid));
 	/* must update doff before signature computation */
-	th->doff += 4;
+	th->doff += TCPOLEN_AUTHOPT_OUTPUT / 4;
 	tcp_v4_authopt_hash_reply(
 			(char*)(optptr + 1),
 			info,
@@ -682,7 +680,7 @@ static int tcp_v4_authopt_handle_reply(
 			ip_hdr(skb)->saddr,
 			th);
 
-	return 16;
+	return TCPOLEN_AUTHOPT_OUTPUT;
 }
 
 /*
@@ -701,8 +699,7 @@ static int tcp_v4_authopt_handle_reply(
 #ifdef CONFIG_TCP_MD5SIG
 #define OPTION_BYTES TCPOLEN_MD5SIG_ALIGNED
 #elif defined(OPTION_BYTES_TCP_AUTHOPT)
-/* Assumes we only write RFC5926 */
-#define OPTION_BYTES 16
+#define OPTION_BYTES TCPOLEN_AUTHOPT_OUTPUT
 #else
 #define OPTION_BYTES sizeof(__be32)
 #endif
@@ -911,8 +908,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 #ifdef CONFIG_TCP_MD5SIG
 			   + (TCPOLEN_MD5SIG_ALIGNED >> 2)
 #elif defined (CONFIG_TCP_AUTHOPT)
-			/* TCP-AO length is exactly 16 bytes for all supported algorithms */
-			   + (4)
+			   + (TCPOLEN_AUTHOPT_OUTPUT >> 2)
 #endif
 			];
 	} rep;

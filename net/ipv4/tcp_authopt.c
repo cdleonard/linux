@@ -1238,7 +1238,7 @@ int tcp_v4_authopt_hash_reply(char *hash_location,
 	err = crypto_shash_final(desc, macbuf);
 	if (err)
 		goto out_err;
-	memcpy(hash_location, macbuf, key->maclen);
+	memcpy(hash_location, macbuf, TCP_AUTHOPT_MACLEN);
 
 	tcp_authopt_put_mac_shash(key, mac_tfm);
 	return 0;
@@ -1246,7 +1246,7 @@ int tcp_v4_authopt_hash_reply(char *hash_location,
 out_err:
 	tcp_authopt_put_mac_shash(key, mac_tfm);
 out_err_traffic_key:
-	memset(hash_location, 0, key->maclen);
+	memset(hash_location, 0, TCP_AUTHOPT_MACLEN);
 	return err;
 }
 

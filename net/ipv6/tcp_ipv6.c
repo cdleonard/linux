@@ -917,10 +917,8 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 
 		if (authopt_info) {
 			authopt_key_info = __tcp_authopt_select_key(sk, authopt_info, sk, &authopt_rnextkeyid);
-			if (WARN_ON_ONCE(authopt_key_info->maclen != 12))
-				authopt_key_info = NULL;
-			else {
-				tot_len += 16;
+			if (authopt_key_info) {
+				tot_len += TCPOLEN_AUTHOPT_OUTPUT;
 				/* Don't use MD5 */
 				key = NULL;
 			}
@@ -987,7 +985,7 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 	if (static_branch_unlikely(&tcp_authopt_needed) && authopt_key_info)
 	{
 		*topt++ = htonl((TCPOPT_AUTHOPT << 24) |
-				(16 << 16) |
+				(TCPOLEN_AUTHOPT_OUTPUT << 16) |
 				(authopt_key_info->send_id << 8) |
 				(authopt_rnextkeyid));
 		tcp_authopt_hash((char*)topt, authopt_key_info, (struct sock*)sk, buff);
