@@ -351,19 +351,52 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID | \
 	TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED)
 
+/* Like copy_from_sockopt except tolerate different optlen for compatibility reasons
+ *
+ * If the src is shorter then it's from an old userspace and the rest of dst is
+ * filled with zeros.
+ *
+ * If the dst is shorter then src is from a newer userspace and we only accept
+ * if the rest of the option is all zeros.
+ *
+ * This allows sockopts to grow as long as for new fields zeros has no effect.
+ */
+static int _copy_from_sockptr_tolerant(
+		u8* dst, unsigned int dstlen,
+		sockptr_t src, unsigned int srclen)
+{
+	int err;
+
+	/* If userspace optlen is too short fill the rest with zeros */
+	if (srclen > dstlen) {
+		if (sockptr_is_kernel(src))
+			return -EINVAL;
+		err = check_zeroed_user(src.user + dstlen, srclen - dstlen);
+		if (err < 0)
+			return err;
+		if (err == 0)
+			return -EINVAL;
+	}
+	err = copy_from_sockptr(dst, src, min(srclen, dstlen));
+	if (err)
+		return err;
+	if (srclen < dstlen)
+		memset(dst + dstlen, 0, dstlen - srclen);
+
+	return err;
+}
+
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 {
 	struct tcp_authopt opt;
 	struct tcp_authopt_info *info;
+	int err;
 
 	sock_owned_by_me(sk);
 
-	/* If userspace optlen is too short fill the rest with zeros */
-	if (optlen > sizeof(opt))
-		return -EINVAL;
-	memset(&opt, 0, sizeof(opt));
-	if (copy_from_sockptr(&opt, optval, optlen))
-		return -EFAULT;
+	err = _copy_from_sockptr_tolerant((u8*)&opt, sizeof(opt), optval, optlen);
+	if (err)
+		return err;
 
 	if (opt.flags & ~TCP_AUTHOPT_KNOWN_FLAGS)
 		return -EINVAL;
@@ -460,12 +493,9 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 
 	sock_owned_by_me(sk);
 
-	/* If userspace optlen is too short fill the rest with zeros */
-	if (optlen > sizeof(opt))
-		return -EINVAL;
-	memset(&opt, 0, sizeof(opt));
-	if (copy_from_sockptr(&opt, optval, optlen))
-		return -EFAULT;
+	err = _copy_from_sockptr_tolerant((u8*)&opt, sizeof(opt), optval, optlen);
+	if (err)
+		return err;
 
 	if (opt.flags & ~TCP_AUTHOPT_KEY_KNOWN_FLAGS)
 		return -EINVAL;
