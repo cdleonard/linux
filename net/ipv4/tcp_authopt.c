@@ -10,6 +10,9 @@
 #define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN		20
 #define TCP_AUTHOPT_MACLEN			12
 
+/* Constant data with per-algorithm information from RFC5926
+ * The "KDF" and "MAC" happen to be the same for both algorithms.
+ */
 struct tcp_authopt_alg_imp {
 	/* Name of algorithm in crypto-api */
 	const char *alg_name;
