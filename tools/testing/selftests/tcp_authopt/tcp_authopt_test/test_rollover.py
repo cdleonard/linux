@@ -3,8 +3,7 @@ import typing
 import socket
 from .server import SimpleServerThread
 from .linux_tcp_authopt import (
-    TCP_AUTHOPT_FLAG_LOCK_KEYID,
-    TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID,
+    TCP_AUTHOPT_FLAG,
     set_tcp_authopt_key,
     tcp_authopt,
     tcp_authopt_key,
@@ -91,7 +90,7 @@ def test_rollover_send_keyid(exit_stack: ExitStack):
             server_key_list=[sk1, sk2],
             client_key_list=[ck1, ck2],
             client_authopt=tcp_authopt(
-                send_keyid=12, flags=TCP_AUTHOPT_FLAG_LOCK_KEYID
+                send_keyid=12, flags=TCP_AUTHOPT_FLAG.LOCK_KEYID
             ),
         )
     )
@@ -102,7 +101,7 @@ def test_rollover_send_keyid(exit_stack: ExitStack):
 
     # Explicit request for key2
     set_tcp_authopt(
-        client_socket, tcp_authopt(send_keyid=22, flags=TCP_AUTHOPT_FLAG_LOCK_KEYID)
+        client_socket, tcp_authopt(send_keyid=22, flags=TCP_AUTHOPT_FLAG.LOCK_KEYID)
     )
     check_socket_echo(client_socket)
     assert get_tcp_authopt(client_socket).recv_keyid == 21
@@ -120,7 +119,7 @@ def test_rollover_rnextkeyid(exit_stack: ExitStack):
             server_key_list=[sk1],
             client_key_list=[ck1, ck2],
             client_authopt=tcp_authopt(
-                send_keyid=12, flags=TCP_AUTHOPT_FLAG_LOCK_KEYID
+                send_keyid=12, flags=TCP_AUTHOPT_FLAG.LOCK_KEYID
             ),
         )
     )
@@ -131,7 +130,7 @@ def test_rollover_rnextkeyid(exit_stack: ExitStack):
     # request rnextkeyd=22 but server does not have it
     set_tcp_authopt(
         client_socket,
-        tcp_authopt(send_rnextkeyid=21, flags=TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID),
+        tcp_authopt(send_rnextkeyid=21, flags=TCP_AUTHOPT_FLAG.LOCK_RNEXTKEYID),
     )
     check_socket_echo(client_socket)
     check_socket_echo(client_socket)
@@ -155,7 +154,7 @@ def test_rollover_delkey(exit_stack: ExitStack):
             server_key_list=[sk1, sk2],
             client_key_list=[ck1, ck2],
             client_authopt=tcp_authopt(
-                send_keyid=12, flags=TCP_AUTHOPT_FLAG_LOCK_KEYID
+                send_keyid=12, flags=TCP_AUTHOPT_FLAG.LOCK_KEYID
             ),
         )
     )
