@@ -4,6 +4,7 @@
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address, ip_address
 import socket
+from enum import IntEnum, IntFlag
 import errno
 import logging
 from .sockaddr import sockaddr_in, sockaddr_in6, sockaddr_storage, sockaddr_unpack
@@ -22,16 +23,22 @@ TCP_AUTHOPT_KEY = 39
 
 TCP_AUTHOPT_MAXKEYLEN = 80
 
-TCP_AUTHOPT_FLAG_LOCK_KEYID = BIT(0)
-TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID = BIT(1)
-TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED = BIT(2)
 
-TCP_AUTHOPT_KEY_DEL = BIT(0)
-TCP_AUTHOPT_KEY_EXCLUDE_OPTS = BIT(1)
-TCP_AUTHOPT_KEY_BIND_ADDR = BIT(2)
+class TCP_AUTHOPT_FLAG(IntFlag):
+    LOCK_KEYID = BIT(0)
+    LOCK_RNEXTKEYID = BIT(1)
+    REJECT_UNEXPECTED = BIT(2)
 
-TCP_AUTHOPT_ALG_HMAC_SHA_1_96 = 1
-TCP_AUTHOPT_ALG_AES_128_CMAC_96 = 2
+
+class TCP_AUTHOPT_KEY_FLAG(IntFlag):
+    DEL = BIT(0)
+    EXCLUDE_OPTS = BIT(1)
+    BIND_ADDR = BIT(2)
+
+
+class TCP_AUTHOPT_ALG(IntEnum):
+    HMAC_SHA_1_96 = 1
+    AES_128_CMAC_96 = 2
 
 
 @dataclass
@@ -65,11 +72,11 @@ class tcp_authopt:
 
 
 def set_tcp_authopt(sock, opt: tcp_authopt):
-    return sock.setsockopt(socket.IPPROTO_TCP, TCP_AUTHOPT, bytes(opt))
+    return sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT, bytes(opt))
 
 
 def get_tcp_authopt(sock: socket.socket) -> tcp_authopt:
-    b = sock.getsockopt(socket.IPPROTO_TCP, TCP_AUTHOPT, tcp_authopt.sizeof)
+    b = sock.getsockopt(socket.SOL_TCP, TCP_AUTHOPT, tcp_authopt.sizeof)
     return tcp_authopt.unpack(b)
 
 
@@ -81,7 +88,7 @@ class tcp_authopt_key:
         flags: int = 0,
         send_id: int = 0,
         recv_id: int = 0,
-        alg=TCP_AUTHOPT_ALG_HMAC_SHA_1_96,
+        alg=TCP_AUTHOPT_ALG.HMAC_SHA_1_96,
         key: bytes = b"",
         addr: bytes = b"",
         include_options=None,
@@ -159,29 +166,47 @@ class tcp_authopt_key:
 
     @property
     def include_options(self) -> bool:
-        return (self.flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS) == 0
+        return (self.flags & TCP_AUTHOPT_KEY.EXCLUDE_OPTS) == 0
 
     @include_options.setter
     def include_options(self, value) -> bool:
         if value:
-            self.flags &= ~TCP_AUTHOPT_KEY_EXCLUDE_OPTS
+            self.flags &= ~TCP_AUTHOPT_KEY_FLAG.EXCLUDE_OPTS
         else:
-            self.flags |= TCP_AUTHOPT_KEY_EXCLUDE_OPTS
+            self.flags |= TCP_AUTHOPT_KEY_FLAG.EXCLUDE_OPTS
 
     @property
     def delete_flag(self) -> bool:
-        return bool(self.flags & TCP_AUTHOPT_KEY_DEL)
+        return bool(self.flags & TCP_AUTHOPT_KEY_FLAG.DEL)
 
     @delete_flag.setter
     def delete_flag(self, value) -> bool:
         if value:
-            self.flags |= TCP_AUTHOPT_KEY_DEL
+            self.flags |= TCP_AUTHOPT_KEY_FLAG.DEL
         else:
-            self.flags &= ~TCP_AUTHOPT_KEY_DEL
+            self.flags &= ~TCP_AUTHOPT_KEY_FLAG.DEL
 
 
 def set_tcp_authopt_key(sock, key: tcp_authopt_key):
-    return sock.setsockopt(socket.IPPROTO_TCP, TCP_AUTHOPT_KEY, bytes(key))
+    return sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT_KEY, bytes(key))
+
+
+def del_tcp_authopt_key(sock, key: tcp_authopt_key) -> bool:
+    """Try to delete an authopt key
+
+    :return: True if a key was deleted, False if it was not present
+    """
+    import copy
+
+    key = copy.copy(key)
+    key.delete_flag = True
+    try:
+        sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT_KEY, bytes(key))
+        return True
+    except OSError as e:
+        if e.errno == errno.ENOENT:
+            return False
+        raise
 
 
 def has_tcp_authopt() -> bool:
@@ -189,7 +214,7 @@ def has_tcp_authopt() -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         try:
             optbuf = bytes(4)
-            sock.setsockopt(socket.IPPROTO_TCP, TCP_AUTHOPT, optbuf)
+            sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT, optbuf)
             return True
         except OSError as e:
             if e.errno == errno.ENOPROTOOPT:
