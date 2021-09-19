@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0
+import threading
 import scapy.sessions
-from scapy.layers.inet import TCP
+from scapy.packet import Packet
+import typing
+import logging
+from .scapy_conntrack import TCPConnectionTracker, TCPConnectionInfo
 
-from .utils import SimpleWaitEvent
+logger = logging.getLogger(__name__)
 
 
 class FullTCPSniffSession(scapy.sessions.DefaultSession):
@@ -11,43 +15,67 @@ class FullTCPSniffSession(scapy.sessions.DefaultSession):
     Allows another thread to wait for a complete FIN handshake without polling or sleep.
     """
 
-    found_syn = False
-    found_synack = False
-    found_fin = False
-    found_client_fin = False
-    found_server_fin = False
+    #: Server port used to identify client and server
+    server_port: int
+    #: Connection tracker
+    tracker: TCPConnectionTracker
 
-    def __init__(self, server_port=None, **kw):
+    def __init__(self, server_port, **kw):
         super().__init__(**kw)
         self.server_port = server_port
-        self._close_event = SimpleWaitEvent()
+        self.tracker = TCPConnectionTracker()
+        self._close_event = threading.Event()
+        self._init_isn_event = threading.Event()
+        self._client_info = None
+        self._server_info = None
 
-    def on_packet_received(self, p):
+    @property
+    def client_info(self) -> TCPConnectionInfo:
+        if not self._client_info:
+            self._client_info = self.tracker.match_one(dport=self.server_port)
+        return self._client_info
+
+    @property
+    def server_info(self) -> TCPConnectionInfo:
+        if not self._server_info:
+            self._server_info = self.tracker.match_one(sport=self.server_port)
+        return self._server_info
+
+    @property
+    def client_isn(self):
+        return self.client_info.sisn
+
+    @property
+    def server_isn(self):
+        return self.server_info.sisn
+
+    def on_packet_received(self, p: Packet):
         super().on_packet_received(p)
-        if not p or not TCP in p:
-            return
-        th = p[TCP]
-        # logger.debug("sport=%d dport=%d flags=%s", th.sport, th.dport, th.flags)
-        if th.flags.S and not th.flags.A:
-            if th.dport == self.server_port or self.server_port is None:
-                self.found_syn = True
-        if th.flags.S and th.flags.A:
-            if th.sport == self.server_port or self.server_port is None:
-                self.found_synack = True
-        if th.flags.F:
-            if self.server_port is None:
-                self.found_fin = True
-                self._close_event.set()
-            elif self.server_port == th.dport:
-                self.found_client_fin = True
-                self.found_fin = True
-                if self.found_server_fin and self.found_client_fin:
-                    self._close_event.set()
-            elif self.server_port == th.sport:
-                self.found_server_fin = True
-                self.found_fin = True
-                if self.found_server_fin and self.found_client_fin:
-                    self._close_event.set()
+        self.tracker.handle_packet(p)
+
+        # check events:
+        if self.client_info.sisn is not None and self.client_info.disn is not None:
+            assert (
+                self.client_info.sisn == self.server_info.disn
+                and self.server_info.sisn == self.client_info.disn
+            )
+            self._init_isn_event.set()
+        if self.client_info.found_recv_finack and self.server_info.found_recv_finack:
+            self._close_event.set()
 
     def wait_close(self, timeout=10):
+        """Wait for a graceful close with FINs acked by both side"""
         self._close_event.wait(timeout=timeout)
+        if not self._close_event.is_set():
+            raise TimeoutError("Timed out waiting for graceful close")
+
+    def wait_init_isn(self, timeout=10):
+        """Wait for both client_isn and server_isn to be determined"""
+        self._init_isn_event.wait(timeout=timeout)
+        if not self._init_isn_event.is_set():
+            raise TimeoutError("Timed out waiting for Initial Sequence Numbers")
+
+    def get_client_server_isn(self, timeout=10) -> typing.Tuple[int, int]:
+        """Return client/server ISN, blocking until they are captured"""
+        self.wait_init_isn(timeout=timeout)
+        return self.client_isn, self.server_isn
