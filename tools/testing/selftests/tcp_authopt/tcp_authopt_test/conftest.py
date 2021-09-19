@@ -19,3 +19,8 @@ def exit_stack():
     """
     with ExitStack() as exit_stack:
         yield exit_stack
+
+
+def pytest_configure():
+    # Silence messages regarding netns enter/exit:
+    logging.getLogger("nsenter").setLevel(logging.INFO)
