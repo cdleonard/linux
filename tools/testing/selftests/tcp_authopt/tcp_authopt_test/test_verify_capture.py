@@ -7,16 +7,16 @@ import socket
 
 import pytest
 
-from . import linux_tcp_authopt, tcp_authopt_alg
+from . import linux_tcp_authopt
 from .full_tcp_sniff_session import FullTCPSniffSession
 from .linux_tcp_authopt import (
     set_tcp_authopt_key,
     tcp_authopt_key,
 )
 from .server import SimpleServerThread
+from .scapy_utils import AsyncSnifferContext
 from .utils import (
     DEFAULT_TCP_SERVER_PORT,
-    AsyncSnifferContext,
     check_socket_echo,
     create_listen_socket,
     nstat_json,
@@ -40,33 +40,37 @@ skipif_cant_capture = pytest.mark.skipif(
 
 def get_alg_id(alg_name) -> int:
     if alg_name == "HMAC-SHA-1-96":
-        return linux_tcp_authopt.TCP_AUTHOPT_ALG_HMAC_SHA_1_96
+        return linux_tcp_authopt.TCP_AUTHOPT_ALG.HMAC_SHA_1_96
     elif alg_name == "AES-128-CMAC-96":
-        return linux_tcp_authopt.TCP_AUTHOPT_ALG_AES_128_CMAC_96
+        return linux_tcp_authopt.TCP_AUTHOPT_ALG.AES_128_CMAC_96
     else:
         raise ValueError()
 
 
 @skipif_cant_capture
 @pytest.mark.parametrize(
-    "address_family,alg_name,include_options",
+    "address_family,alg_name,include_options,transfer_data",
     [
-        (socket.AF_INET, "HMAC-SHA-1-96", True),
-        (socket.AF_INET, "AES-128-CMAC-96", True),
-        (socket.AF_INET, "AES-128-CMAC-96", False),
-        (socket.AF_INET6, "HMAC-SHA-1-96", True),
-        (socket.AF_INET6, "HMAC-SHA-1-96", False),
-        (socket.AF_INET6, "AES-128-CMAC-96", True),
+        (socket.AF_INET, "HMAC-SHA-1-96", True, True),
+        (socket.AF_INET, "AES-128-CMAC-96", True, True),
+        (socket.AF_INET, "AES-128-CMAC-96", False, True),
+        (socket.AF_INET6, "HMAC-SHA-1-96", True, True),
+        (socket.AF_INET6, "HMAC-SHA-1-96", False, True),
+        (socket.AF_INET6, "AES-128-CMAC-96", True, True),
+        (socket.AF_INET, "HMAC-SHA-1-96", True, False),
+        (socket.AF_INET6, "AES-128-CMAC-96", False, False),
     ],
 )
-def test_verify_capture(exit_stack, address_family, alg_name, include_options):
+def test_verify_capture(
+    exit_stack, address_family, alg_name, include_options, transfer_data
+):
     master_key = b"testvector"
     alg_id = get_alg_id(alg_name)
 
     session = FullTCPSniffSession(server_port=DEFAULT_TCP_SERVER_PORT)
     sniffer = exit_stack.enter_context(
         AsyncSnifferContext(
-            filter=f"tcp port {DEFAULT_TCP_SERVER_PORT}",
+            filter=f"inbound and tcp port {DEFAULT_TCP_SERVER_PORT}",
             iface="lo",
             session=session,
         )
@@ -79,14 +83,9 @@ def test_verify_capture(exit_stack, address_family, alg_name, include_options):
     client_socket = socket.socket(address_family, socket.SOCK_STREAM)
     client_socket = exit_stack.push(client_socket)
 
-    set_tcp_authopt_key(
-        listen_socket,
-        tcp_authopt_key(alg=alg_id, key=master_key, include_options=include_options),
-    )
-    set_tcp_authopt_key(
-        client_socket,
-        tcp_authopt_key(alg=alg_id, key=master_key, include_options=include_options),
-    )
+    key = tcp_authopt_key(alg=alg_id, key=master_key, include_options=include_options)
+    set_tcp_authopt_key(listen_socket, key)
+    set_tcp_authopt_key(client_socket, key)
 
     # even if one signature is incorrect keep processing the capture
     old_nstat = nstat_json()
@@ -98,26 +97,22 @@ def test_verify_capture(exit_stack, address_family, alg_name, include_options):
     try:
         client_socket.settimeout(1.0)
         client_socket.connect(("localhost", DEFAULT_TCP_SERVER_PORT))
-        for _ in range(5):
-            check_socket_echo(client_socket)
+        if transfer_data:
+            for _ in range(5):
+                check_socket_echo(client_socket)
+        client_socket.close()
+        session.wait_close()
     except socket.timeout:
+        # If invalid packets are sent let the validator run
         logger.warning("socket timeout", exc_info=True)
         pass
-    client_socket.close()
-    session.wait_close()
+
     sniffer.stop()
 
     logger.info("capture: %r", sniffer.results)
     for p in sniffer.results:
         validator.handle_packet(p)
+    validator.raise_errors()
 
-    assert not validator.any_fail
-    assert not validator.any_unsigned
-    # Fails because of duplicate packets:
-    # assert not validator.any_incomplete
     new_nstat = nstat_json()
-    assert (
-        0
-        == new_nstat["kernel"]["TcpExtTCPAuthOptFailure"]
-        - old_nstat["kernel"]["TcpExtTCPAuthOptFailure"]
-    )
+    assert old_nstat["TcpExtTCPAuthOptFailure"] == new_nstat["TcpExtTCPAuthOptFailure"]
