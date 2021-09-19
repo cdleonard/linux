@@ -12,22 +12,35 @@ class SimpleServerThread(Thread):
     """Simple server thread for testing TCP sockets
 
     All data is read in 1000 bytes chunks and either echoed back or discarded.
+
+    :ivar keep_half_open: do not close in response to remote close.
     """
 
-    def __init__(self, socket, mode="recv"):
+    DEFAULT_BUFSIZE = 1000
+
+    def __init__(self, socket, mode="recv", bufsize=DEFAULT_BUFSIZE, keep_half_open=False):
         self.listen_socket = socket
         self.server_socket = []
+        self.bufsize = bufsize
+        self.keep_half_open = keep_half_open
         self.mode = mode
         super().__init__()
 
     def _read(self, conn, events):
         # logger.debug("events=%r", events)
-        data = conn.recv(1000)
-        # logger.debug("len(data)=%r", len(data))
-        if len(data) == 0:
-            # logger.info("closing %r", conn)
+        try:
+            data = conn.recv(self.bufsize)
+        except ConnectionResetError:
+            # logger.info("reset %r", conn)
             conn.close()
             self.sel.unregister(conn)
+            return
+        # logger.debug("len(data)=%r", len(data))
+        if len(data) == 0:
+            if not self.keep_half_open:
+                # logger.info("closing %r", conn)
+                conn.close()
+                self.sel.unregister(conn)
         else:
             if self.mode == "echo":
                 conn.sendall(data)
