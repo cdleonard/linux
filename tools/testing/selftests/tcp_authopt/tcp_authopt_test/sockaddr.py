@@ -3,7 +3,7 @@
 import socket
 import struct
 from dataclasses import dataclass
-from ipaddress import IPv4Address, IPv6Address
+from ipaddress import IPv4Address, IPv6Address, ip_address
 
 
 @dataclass
@@ -99,3 +99,14 @@ def sockaddr_unpack(buffer: bytes):
         return sockaddr_in6.unpack(buffer)
     else:
         return sockaddr_storage.unpack(buffer)
+
+
+def sockaddr_convert(val):
+    """Try to convert address into some sort of sockaddr"""
+    if isinstance(val, IPv4Address):
+        return sockaddr_in(addr=val)
+    if isinstance(val, IPv6Address):
+        return sockaddr_in6(addr=val)
+    if isinstance(val, str):
+        return sockaddr_convert(ip_address(val))
+    raise TypeError(f"Don't know how to convert {val!r} to sockaddr")
