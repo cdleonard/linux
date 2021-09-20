@@ -99,11 +99,11 @@ class TcpAuthValidator:
             return
 
         alg = key.get_alg_imp()
-        context_bytes = scapy_tcp_authopt.build_context_from_scapy(
+        context_bytes = scapy_tcp_authopt.build_context_from_packet(
             p, conn.sisn or 0, conn.disn or 0
         )
         traffic_key = alg.kdf(key.key, context_bytes)
-        message_bytes = scapy_tcp_authopt.build_message_from_scapy(
+        message_bytes = scapy_tcp_authopt.build_message_from_packet(
             p, include_options=key.include_options
         )
         computed_mac = alg.mac(traffic_key, message_bytes)
