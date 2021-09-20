@@ -35,6 +35,16 @@ class NamespaceFixture:
     server_mac_addr = "02:00:00:00:00:01"
     client_mac_addr = "02:00:00:00:00:02"
 
+    ipv4_prefix_len = 16
+    ipv6_prefix_len = 64
+
+    @classmethod
+    def get_prefix_length(cls, address_family) -> int:
+        return {
+            socket.AF_INET: cls.ipv4_prefix_len,
+            socket.AF_INET6: cls.ipv6_prefix_len,
+        }[address_family]
+
     def __init__(self, **kw):
         for k, v in kw.items():
             setattr(self, k, v)
