@@ -425,6 +425,7 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tcp_authopt_info *info;
+	struct tcp_authopt_key_info *send_key;
 
 	sock_owned_by_me(sk);
 	if (!sysctl_tcp_authopt)
@@ -440,8 +441,8 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	 * Reporting zero is not strictly correct because there are no reserved
 	 * values.
 	 */
-	if (info->send_key)
-		opt->send_keyid = info->send_key->send_id;
+	if ((send_key = rcu_dereference_check(info->send_key, lockdep_sock_is_held(sk))))
+		opt->send_keyid = send_key->send_id;
 	else
 		opt->send_keyid = 0;
 	opt->send_rnextkeyid = info->send_rnextkeyid;
