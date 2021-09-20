@@ -3,7 +3,7 @@ import logging
 from ipaddress import IPv4Address, IPv6Address
 from scapy.layers.inet import IP, TCP
 from scapy.layers.inet6 import IPv6
-from .scapy_tcp_authopt import get_alg, build_context_from_scapy, build_message_from_scapy
+from .scapy_tcp_authopt import get_alg, build_context_from_packet, build_message_from_packet
 from .scapy_utils import scapy_tcp_get_authopt_val
 import socket
 
@@ -68,12 +68,12 @@ class TestIETFVectors:
 
         # check traffic key
         alg = get_alg(alg_name)
-        context_bytes = build_context_from_scapy(p, src_isn, dst_isn)
+        context_bytes = build_context_from_packet(p, src_isn, dst_isn)
         traffic_key = alg.kdf(self.master_key, context_bytes)
         assert traffic_key.hex(" ") == traffic_key_hex
 
         # check mac
-        message_bytes = build_message_from_scapy(
+        message_bytes = build_message_from_packet(
             p, include_options=include_options, sne=sne
         )
         mac = alg.mac(traffic_key, message_bytes)
