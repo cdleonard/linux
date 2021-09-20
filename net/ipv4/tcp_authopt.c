@@ -452,27 +452,37 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	return 0;
 }
 
+/* Free key nicely, for living sockets */
 static void tcp_authopt_key_del(struct sock *sk,
 				struct tcp_authopt_info *info,
 				struct tcp_authopt_key_info *key)
 {
+	sock_owned_by_me(sk);
 	hlist_del_rcu(&key->node);
 	if (info->send_key == key)
 		info->send_key = NULL;
-	/* missing on timewait case: */
-	if (sk)
-		atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
+	atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
 	kfree_rcu(key, rcu);
 }
 
-/* free info and keys but don't touch tp->authopt_info */
+/* Free info and keys.
+ * Don't touch tp->authopt_info, it might not even be assigned yes.
+ */
 void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info)
 {
 	struct hlist_node *n;
 	struct tcp_authopt_key_info *key;
 
-	hlist_for_each_entry_safe(key, n, &info->head, node)
-		tcp_authopt_key_del(sk, info, key);
+	hlist_for_each_entry_safe(key, n, &info->head, node) {
+		/* sk is NULL for timewait case
+		 * struct timewait_sock doesn't track sk_omem_alloc
+		 */
+		if (sk)
+			atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
+		/* Checks inside tcp_authopt_key_del do not apply */
+		hlist_del_rcu(&key->node);
+		kfree_rcu(key, rcu);
+	}
 	kfree_rcu(info, rcu);
 }
 
