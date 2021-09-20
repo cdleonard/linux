@@ -1144,6 +1144,12 @@ tcp_plb_cong_thresh - INTEGER
 
 	Default: 128
 
+tcp_authopt - BOOLEAN
+	Enable the TCP Authentication Option (RFC5925), a replacement for TCP
+	MD5 Signatures (RFC2835).
+
+	Default: 0
+
 UDP variables
 =============
 
@@ -3114,4 +3120,3 @@ max_dgram_qlen - INTEGER
 	The maximum length of dgram socket receive queue
 
 	Default: 10
-
