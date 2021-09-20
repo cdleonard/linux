@@ -1040,6 +1040,12 @@ tcp_challenge_ack_limit - INTEGER
 	TCP stack implements per TCP socket limits anyway.
 	Default: INT_MAX (unlimited)
 
+tcp_authopt - BOOLEAN
+	Enable the TCP Authentication Option (RFC5925), a replacement for TCP
+	MD5 Signatures (RFC2835).
+
+	Default: 0
+
 UDP variables
 =============
 
