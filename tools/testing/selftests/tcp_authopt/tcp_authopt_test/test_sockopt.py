@@ -7,11 +7,11 @@ from ipaddress import IPv4Address, IPv6Address
 
 import pytest
 
-from . import linux_tcp_authopt
 from .linux_tcp_authopt import (
     TCP_AUTHOPT,
     TCP_AUTHOPT_KEY,
     TCP_AUTHOPT_ALG,
+    TCP_AUTHOPT_FLAG,
     TCP_AUTHOPT_KEY_FLAG,
     set_tcp_authopt,
     get_tcp_authopt,
@@ -96,7 +96,7 @@ def test_set_get_tcp_authopt_flags():
         assert opt.flags == 0
 
         # simple flags are echoed
-        goodflag = linux_tcp_authopt.TCP_AUTHOPT_FLAG.REJECT_UNEXPECTED
+        goodflag = TCP_AUTHOPT_FLAG.REJECT_UNEXPECTED
         set_tcp_authopt(sock, tcp_authopt(flags=goodflag))
         opt = get_tcp_authopt(sock)
         assert opt.flags == goodflag
@@ -147,7 +147,7 @@ def test_authopt_key_longer_bad():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         key = tcp_authopt_key(alg=TCP_AUTHOPT_ALG.HMAC_SHA_1_96, key="aaa")
         optbuf = bytes(key)
-        optbuf = optbuf.ljust(len(optbuf) + 4, b"\x5a")
+        optbuf = optbuf.ljust(len(optbuf) + 256, b"\x5a")
         with pytest.raises(OSError):
             sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT_KEY, optbuf)
 
@@ -161,7 +161,7 @@ def test_authopt_key_longer_zeros():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         key = tcp_authopt_key(alg=TCP_AUTHOPT_ALG.HMAC_SHA_1_96, key="aaa")
         optbuf = bytes(key)
-        optbuf = optbuf.ljust(len(optbuf) + 4, b"\x00")
+        optbuf = optbuf.ljust(len(optbuf) + 256, b"\x00")
         sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT_KEY, optbuf)
         # the key was added and can be deleted normally
         assert del_tcp_authopt_key(sock, key) == True
@@ -172,7 +172,7 @@ def test_authopt_longer_baddata():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         opt = tcp_authopt()
         optbuf = bytes(opt)
-        optbuf = optbuf.ljust(len(optbuf) + 4, b"\x5a")
+        optbuf = optbuf.ljust(len(optbuf) + 256, b"\x5a")
         with pytest.raises(OSError):
             sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT, optbuf)
 
@@ -181,5 +181,5 @@ def test_authopt_longer_zeros():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         opt = tcp_authopt()
         optbuf = bytes(opt)
-        optbuf = optbuf.ljust(len(optbuf) + 4, b"\x00")
+        optbuf = optbuf.ljust(len(optbuf) + 256, b"\x00")
         sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT, optbuf)
