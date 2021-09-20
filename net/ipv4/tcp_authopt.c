@@ -1400,10 +1400,18 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 
 accept:
 	/* Doing this for all valid packets will results in keyids temporarily
-	 * flipping back and forth if packets are reordered or retransmitted.
+	 * flipping back and forth if packets are reordered or retransmitted
+	 * but keys should eventually stabilize.
+	 *
+	 * This is connection-specific so don't store for listen sockets.
+	 *
+	 * We could store rnextkeyid from SYN in a request sock and use it for
+	 * the SYNACK but we don't.
 	 */
-	info->recv_keyid = opt->keyid;
-	info->recv_rnextkeyid = opt->rnextkeyid;
+	if (sk->sk_state != TCP_LISTEN) {
+		info->recv_keyid = opt->keyid;
+		info->recv_rnextkeyid = opt->rnextkeyid;
+	}
 
 	return 1;
 }
