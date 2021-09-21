@@ -291,14 +291,18 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct tcp_authopt_i
  *
  * Result is protected by RCU and can't be stored, it may only be passed to
  * tcp_authopt_hash and only under a single rcu_read_lock.
+ *
+ * If locked is false then we're not holding the socket lock. This happens for
+ * some timewait and reset cases.
  */
 struct tcp_authopt_key_info *__tcp_authopt_select_key(
 		const struct sock *sk,
 		struct tcp_authopt_info *info,
 		const struct sock *addr_sk,
-		u8 *rnextkeyid)
+		u8 *rnextkeyid,
+		bool locked)
 {
-	struct tcp_authopt_key_info *key, *new_key;
+	struct tcp_authopt_key_info *key, *new_key = NULL;
 
 	/* Listen sockets don't refer to any specific connection so we don't try
 	 * to keep using the same key and ignore any received keyids.
@@ -314,11 +318,13 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(
 		return key;
 	}
 
-	key = rcu_dereference_check(info->send_key, lockdep_sock_is_held(sk));
+	if (locked)
+		key = rcu_dereference_protected(info->send_key, lockdep_sock_is_held(sk));
+	else
+		key = rcu_dereference(info->send_key);
 
 	/* Try to keep the same sending key unless user or peer requires a different key
 	 * User request (via TCP_AUTHOPT_FLAG_LOCK_KEYID) always overrides peer request.
-	 * If no key found with specific send_id try anything else.
 	 */
 	if (info->flags & TCP_AUTHOPT_FLAG_LOCK_KEYID) {
 		int send_keyid = info->send_keyid;
@@ -329,13 +335,17 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(
 		if (!key || key->send_id != info->recv_rnextkeyid)
 			new_key = tcp_authopt_lookup_send(info, addr_sk, info->recv_rnextkeyid);
 	}
+	/* If no key found with specific send_id try anything else. */
 	if (!key && !new_key)
 		new_key = tcp_authopt_lookup_send(info, addr_sk, -1);
 
-	// Change current key.
-	if (key != new_key && new_key) {
+	/* Update current key only if we hold the socket lock, otherwise we might
+	 * store a pointer that goes stale
+	 */
+	if (new_key && key != new_key) {
 		key = new_key;
-		info->send_key = key;
+		if (locked)
+			rcu_assign_pointer(info->send_key, key);
 	}
 
 	if (key) {
@@ -478,6 +488,8 @@ static void tcp_authopt_key_del(struct sock *sk,
 {
 	sock_owned_by_me(sk);
 	hlist_del_rcu(&key->node);
+	if (rcu_dereference_protected(info->send_key, lockdep_sock_is_held(sk)) == key)
+		rcu_assign_pointer(info->send_key, NULL);
 	atomic_sub(sizeof(*key), &sk->sk_omem_alloc);
 	kfree_rcu(key, rcu);
 }
