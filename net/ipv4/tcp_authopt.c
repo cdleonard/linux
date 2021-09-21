@@ -300,7 +300,26 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(
 {
 	struct tcp_authopt_key_info *key, *new_key;
 
-	key = info->send_key;
+	/* Listen sockets don't refer to any specific connection so we don't try
+	 * to keep using the same key and ignore any received keyids.
+	 */
+	if (sk->sk_state == TCP_LISTEN) {
+		int send_keyid = -1;
+		if (info->flags & TCP_AUTHOPT_FLAG_LOCK_KEYID)
+			send_keyid = info->send_keyid;
+		key = tcp_authopt_lookup_send(info, addr_sk, send_keyid);
+		if (key)
+			*rnextkeyid = key->recv_id;
+
+		return key;
+	}
+
+	key = rcu_dereference_check(info->send_key, lockdep_sock_is_held(sk));
+
+	/* Try to keep the same sending key unless user or peer requires a different key
+	 * User request (via TCP_AUTHOPT_FLAG_LOCK_KEYID) always overrides peer request.
+	 * If no key found with specific send_id try anything else.
+	 */
 	if (info->flags & TCP_AUTHOPT_FLAG_LOCK_KEYID) {
 		int send_keyid = info->send_keyid;
 
