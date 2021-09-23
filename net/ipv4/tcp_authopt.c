@@ -1386,7 +1386,8 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	 * in which TCP MD5 is used. When both options appear, TCP MUST silently
 	 * discard the segment.
 	 */
-	if (tcp_parse_md5sig_option(th)) {
+	if (opt && tcp_parse_md5sig_option(th)) {
+		net_info_ratelimited("TCP AO and MD5 both present on same packet: discarded\n");
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		return -EINVAL;
 	}
