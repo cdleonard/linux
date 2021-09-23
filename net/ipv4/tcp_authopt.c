@@ -818,13 +818,15 @@ static int aes_setkey_derived(struct crypto_shash *tfm, u8 *key, size_t keylen)
 	static const u8 zeros[16] = {0};
 	u8 derived_key[16];
 	int err;
+	SHASH_DESC_ON_STACK(desc, tfm);
 
 	if (WARN_ON_ONCE(crypto_shash_digestsize(tfm) != 16))
 		return -EINVAL;
 	err = crypto_shash_setkey(tfm, zeros, sizeof(zeros));
 	if (err)
 		return err;
-	err = crypto_shash_tfm_digest(tfm, key, keylen, derived_key);
+	desc->tfm = tfm;
+	err = crypto_shash_digest(desc, key, keylen, derived_key);
 	if (err)
 		return err;
 	return crypto_shash_setkey(tfm, derived_key, sizeof(derived_key));
