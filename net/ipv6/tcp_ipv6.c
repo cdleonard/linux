@@ -1514,8 +1514,7 @@ static void tcp_v6_fill_cb(struct sk_buff *skb, const struct ipv6hdr *hdr,
 
 static int tcp_v6_auth_inbound_check(
 		struct sock *sk,
-		struct sk_buff *skb,
-		int dif, int sdif)
+		struct sk_buff *skb)
 {
 	int aoret;
 
@@ -1525,7 +1524,7 @@ static int tcp_v6_auth_inbound_check(
 	if (aoret > 0)
 		return 0;
 
-	return tcp_v6_inbound_md5_hash(sk, skb, dif, sdif);
+	return tcp_v6_inbound_md5_hash(sk, skb);
 }
 
 INDIRECT_CALLABLE_SCOPE int tcp_v6_rcv(struct sk_buff *skb)
@@ -1580,7 +1579,7 @@ process:
 		struct sock *nsk;
 
 		sk = req->rsk_listener;
-		if (tcp_v6_auth_inbound_check(sk, skb, dif, sdif)) {
+		if (tcp_v6_auth_inbound_check(sk, skb)) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
 			goto discard_it;
@@ -1635,7 +1634,7 @@ process:
 	if (!xfrm6_policy_check(sk, XFRM_POLICY_IN, skb))
 		goto discard_and_relse;
 
-	if (tcp_v6_auth_inbound_check(sk, skb, dif, sdif))
+	if (tcp_v6_auth_inbound_check(sk, skb))
 		goto discard_and_relse;
 
 	if (tcp_filter(sk, skb))
