@@ -68,9 +68,9 @@ DECLARE_STATIC_KEY_FALSE(tcp_authopt_needed);
 
 void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info);
 void tcp_authopt_clear(struct sock *sk);
-int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
+int tcp_set_authopt(struct sock *sk, char __user *optval, unsigned int optlen);
 int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key);
-int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen);
+int tcp_set_authopt_key(struct sock *sk, char __user *optval, unsigned int optlen);
 struct tcp_authopt_key_info *__tcp_authopt_select_key(
 		const struct sock *sk,
 		struct tcp_authopt_info *info,
@@ -148,7 +148,7 @@ static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb
 	return 0;
 }
 #else
-static inline int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
+static inline int tcp_set_authopt(struct sock *sk, char __user *optval, unsigned int optlen)
 {
 	return -ENOPROTOOPT;
 }
@@ -162,7 +162,7 @@ static inline void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *in
 static inline void tcp_authopt_clear(struct sock *sk)
 {
 }
-static inline int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
+static inline int tcp_set_authopt_key(struct sock *sk, char __user *optval, unsigned int optlen)
 {
 	return -ENOPROTOOPT;
 }
