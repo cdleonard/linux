@@ -643,6 +643,7 @@ void tcp_v4_send_check(struct sock *sk, struct sk_buff *skb)
 }
 EXPORT_SYMBOL(tcp_v4_send_check);
 
+#ifdef CONFIG_TCP_AUTHOPT
 /** tcp_v4_authopt_handle_reply - Insert TCPOPT_AUTHOPT if required
  *
  * returns number of bytes (always aligned to 4) or zero
@@ -680,6 +681,7 @@ static int tcp_v4_authopt_handle_reply(const struct sock *sk,
 
 	return TCPOLEN_AUTHOPT_OUTPUT;
 }
+#endif
 
 /*
  *	This routine will send an RST to the other tcp.
@@ -833,7 +835,9 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 				     ip_hdr(skb)->daddr, &rep.th);
 	}
 #endif
+#ifdef CONFIG_TCP_AUTHOPT
 skip_md5sig:
+#endif
 	/* Can't co-exist with TCPMD5, hence check rep.opt[0] */
 	if (rep.opt[0] == 0) {
 		__be32 mrst = mptcp_reset_option(skb);
@@ -886,8 +890,10 @@ skip_md5sig:
 	__TCP_INC_STATS(net, TCP_MIB_OUTRSTS);
 	local_bh_enable();
 
-#if defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT)
+#if defined(CONFIG_TCP_MD5SIG)
 out:
+#endif
+#if defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT)
 	rcu_read_unlock();
 #endif
 }
