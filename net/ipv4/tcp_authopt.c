@@ -1265,6 +1265,7 @@ int tcp_authopt_hash(char *hash_location,
 
 	return 0;
 }
+EXPORT_SYMBOL(tcp_authopt_hash);
 
 /**
  * tcp_v4_authopt_hash_hdr - Hash tcp+ipv4 header without SKB
