@@ -812,9 +812,9 @@ static int tcp_v6_send_response_init_authopt(const struct sock *sk,
 	if (!(tcp_authopt_needed && sk))
 		return 0;
 	if (sk->sk_state == TCP_TIME_WAIT)
-		*info = tcp_twsk(sk)->tw_authopt_info;
+		*info = get_tcp_tw_authopt_info(tcp_twsk(sk));
 	else
-		*info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		*info = get_tcp_authopt_info(tcp_sk(sk));
 	if (!*info)
 		return 0;
 	*key = __tcp_authopt_select_key(sk, *info, sk, rnextkeyid, false);

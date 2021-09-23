@@ -407,11 +407,14 @@ EXPORT_SYMBOL(__tcp_authopt_select_key);
 
 static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk)
 {
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_authopt_sock_shadow *shadow;
 	struct tcp_authopt_info *info;
 
-	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
-	if (info)
+	shadow = klp_shadow_get_or_alloc(sk, TCP_AUTHOPT_SOCK_SHADOW, sizeof(*shadow), GFP_KERNEL, NULL, NULL);
+	if (!shadow)
+		return ERR_PTR(-ENOMEM);
+	info = rcu_dereference_check(shadow->info, lockdep_sock_is_held(sk));
+	if (shadow->info)
 		return info;
 
 	info = kzalloc(sizeof(*info), GFP_KERNEL);
@@ -422,7 +425,7 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	static_branch_inc(&tcp_authopt_needed_key);
 	sk_gso_disable(sk);
 	INIT_HLIST_HEAD(&info->head);
-	rcu_assign_pointer(tp->authopt_info, info);
+	rcu_assign_pointer(shadow->info, info);
 
 	return info;
 }
@@ -515,7 +518,7 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	if (err)
 		return err;
 
-	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	info = get_tcp_authopt_info(tp);
 	if (!info)
 		return -ENOENT;
 
@@ -548,7 +551,7 @@ int tcp_get_repair_authopt_val(struct sock *sk, struct tcp_repair_authopt *opt)
 	if (err)
 		return err;
 
-	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	info = get_tcp_authopt_info(tp);
 	if (!info)
 		return -ENOENT;
 
@@ -598,10 +601,10 @@ void tcp_authopt_clear(struct sock *sk)
 {
 	struct tcp_authopt_info *info;
 
-	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
+	info = get_tcp_authopt_info(tcp_sk(sk));
 	if (info) {
 		tcp_authopt_free(sk, info);
-		tcp_sk(sk)->authopt_info = NULL;
+		klp_shadow_free(sk, TCP_AUTHOPT_SOCK_SHADOW, NULL);
 	}
 }
 
@@ -650,7 +653,7 @@ int tcp_set_authopt_key(struct sock *sk, char __user *optval, unsigned int optle
 
 	/* Delete is a special case: */
 	if (opt.flags & TCP_AUTHOPT_KEY_DEL) {
-		info = rcu_dereference_check(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
+		info = get_tcp_authopt_info(tcp_sk(sk));
 		if (!info)
 			return -ENOENT;
 		key_info = tcp_authopt_key_lookup_exact(sk, info, &opt);
@@ -838,14 +841,12 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 {
 	struct tcp_authopt_info *old_info;
 	struct tcp_authopt_info *new_info;
+	struct tcp_authopt_sock_shadow *new_shadow;
 	int err;
 
-	old_info = rcu_dereference(tcp_sk(oldsk)->authopt_info);
+	old_info = get_tcp_authopt_info(tcp_sk(oldsk));
 	if (!old_info)
 		return 0;
-
-	/* Clear value copies from oldsk: */
-	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, NULL);
 
 	new_info = kzalloc(sizeof(*new_info), GFP_ATOMIC);
 	if (!new_info)
@@ -863,9 +864,33 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 		return err;
 	}
 	sk_gso_disable(newsk);
-	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, new_info);
+	new_shadow = klp_shadow_alloc(newsk, TCP_AUTHOPT_SOCK_SHADOW, sizeof(*new_shadow), GFP_ATOMIC, NULL, NULL);
+	rcu_assign_pointer(new_shadow->info, new_info);
 
 	return 0;
+}
+
+void __tcp_authopt_time_wait(struct tcp_timewait_sock *tcptw, struct tcp_sock *tp)
+{
+	struct tcp_authopt_sock_shadow *old_shadow, *new_shadow;
+
+	/* Transfer ownership of authopt_info to the twsk
+	 * This requires no other users of the origin sock.
+	 */
+	sock_owned_by_me((struct sock *)tp);
+	old_shadow = get_tcp_authopt_shadow((struct sock *)tp);
+	if (!old_shadow || !old_shadow->info)
+		return;
+
+	new_shadow = klp_shadow_alloc((struct sock*)tcptw,
+					TCP_AUTHOPT_SOCK_SHADOW,
+					sizeof(*new_shadow),
+					GFP_ATOMIC,
+					NULL,
+					NULL);
+	new_shadow->info = old_shadow->info;
+	old_shadow->info = NULL;
+	klp_shadow_free((struct sock *)tp, TCP_AUTHOPT_SOCK_SHADOW, NULL);
 }
 
 /* feed traffic key into shash */
