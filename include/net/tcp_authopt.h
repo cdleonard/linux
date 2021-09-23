@@ -225,7 +225,7 @@ static inline int tcp_authopt_openreq(struct sock *newsk,
 }
 static inline void tcp_authopt_time_wait(
 		struct tcp_timewait_sock *tcptw,
-		struct tcp_sock *tp);
+		struct tcp_sock *tp)
 {
 }
 static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb)
