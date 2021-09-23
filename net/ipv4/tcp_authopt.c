@@ -1381,6 +1381,7 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	int err;
 
 	opt = (struct tcphdr_authopt *)tcp_authopt_find_option(th);
+#ifdef CONFIG_TCP_MD5SIG
 	/* RFC5925 2.2: An endpoint MUST NOT use TCP-AO for the same connection
 	 * in which TCP MD5 is used. When both options appear, TCP MUST silently
 	 * discard the segment.
@@ -1389,6 +1390,7 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		return -EINVAL;
 	}
+#endif
 	key = tcp_authopt_lookup_recv(sk, skb, info, opt ? opt->keyid : -1);
 
 	/* nothing found or expected */
