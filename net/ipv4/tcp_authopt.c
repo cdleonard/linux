@@ -1384,8 +1384,8 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	 * in which TCP MD5 is used. When both options appear, TCP MUST silently
 	 * discard the segment.
 	 */
-	if (tcp_parse_md5sig_option(th)) {
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
+	if (opt && tcp_parse_md5sig_option(th)) {
+		net_info_ratelimited("TCP AO and MD5 both present on same packet: discarded\n");
 		return -EINVAL;
 	}
 	key = tcp_authopt_lookup_recv(sk, skb, info, opt ? opt->keyid : -1);
@@ -1394,7 +1394,6 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	if (!opt && !key)
 		return 0;
 	if (!opt && key) {
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		net_info_ratelimited("TCP Authentication Missing\n");
 		return -EINVAL;
 	}
@@ -1406,7 +1405,6 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		 * connections.
 		 */
 		if (info->flags & TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED) {
-			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 			net_info_ratelimited("TCP Authentication Unexpected: Rejected\n");
 			return -EINVAL;
 		} else {
@@ -1424,7 +1422,6 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		return err;
 
 	if (memcmp(macbuf, opt->mac, TCP_AUTHOPT_MACLEN)) {
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		net_info_ratelimited("TCP Authentication Failed\n");
 		return -EINVAL;
 	}
