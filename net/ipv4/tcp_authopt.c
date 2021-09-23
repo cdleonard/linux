@@ -283,7 +283,7 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct tcp_authopt_i
 }
 
 /**
- * tcp_authopt_select_key - select key for sending
+ * __tcp_authopt_select_key - select key for sending
  *
  * addr_sk is the sock used for comparing daddr, it is only different from sk in
  * the synack case.
