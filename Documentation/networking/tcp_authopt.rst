@@ -46,6 +46,38 @@ RFC5925 requires that key ids do not overlap when tcp identifiers (addr/port)
 overlap. This is not enforced by linux, configuring ambiguous keys will result
 in packet drops and lost connections.
 
+Key selection
+-------------
+
+On getsockopt(TCP_AUTHOPT) information is provided about keyid/rnextkeyid in
+the last send packet and about the keyid/rnextkeyd in the last valid received
+packet.
+
+By default the sending keyid is selected to match the rnextkeyid value sent by
+the remote side, visible as recv_rnextkeyid in getsockopt. If that keyid is not
+available then the valid key with the longest send validity time is used, and
+otherwise ties are broken by preferring lowest numeric send_id.
+
+If the ``TCP_AUTHOPT_LOCK_KEYID`` flag is set then the sending key is selected
+by the `tcp_authopt.send_local_id` field and recv_rnextkeyid is ignored. If no
+key with local_id == send_local_id is valid then the same default is used
+as for missing recv_rnextkeyid.
+
+The rnextkeyid value sent on the wire is the recv_id of the valid key with the
+longest recv validity time, and otherwise ties are broken by preferring lowest
+numeric recv_id.
+
+If the TCP_AUTHOPT_LOCK_RNEXTKEY flag is set in `tcp_authopt.flags` the value of
+`tcp_authopt.send_rnextkeyid` is sent instead.
+
+The default key selection behavior is designed to implement key rollover in a
+way that is compatible with existing vendors without needing userspace key
+management. It also tries to behave predictably in all scenarios therefore it
+breaks ties by numeric IDs.
+
+An userspace daemon can use the "lock" flags to implement different key
+management and key rotation policies.
+
 ABI Reference
 =============
 
