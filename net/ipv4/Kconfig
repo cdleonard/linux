@@ -736,6 +736,7 @@ config TCP_AUTHOPT
 	select CRYPTO_HMAC
 	select CRYPTO_AES
 	select CRYPTO_CMAC
+	default y
 	help
 	  RFC5925 specifies a new method of giving protection to TCP sessions.
 	  Its intended use is to protect BGP sessions between core routers

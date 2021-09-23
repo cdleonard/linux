@@ -3,6 +3,7 @@
 #define _LINUX_TCP_AUTHOPT_H
 
 #include <uapi/linux/tcp.h>
+#include <linux/livepatch.h>
 
 /* According to RFC5925 the length of the authentication option varies based on
  * the signature algorithm. Linux only implements the algorithms defined in
@@ -62,6 +63,27 @@ struct tcp_authopt_info {
 	u32 dst_isn;
 };
 
+/* Do not use tcp_authopt_info itself as shadow to allow transfer from live to timewait socket. */
+struct tcp_authopt_sock_shadow {
+	struct tcp_authopt_info *info;
+};
+
+#define TCP_AUTHOPT_SOCK_SHADOW 19861023
+
+static inline struct tcp_authopt_sock_shadow* get_tcp_authopt_shadow(struct sock *sk) {
+	return klp_shadow_get(sk, TCP_AUTHOPT_SOCK_SHADOW);
+}
+
+static inline struct tcp_authopt_info* get_tcp_authopt_info(struct tcp_sock *tp) {
+	struct tcp_authopt_sock_shadow* shadow = get_tcp_authopt_shadow((struct sock *)tp);
+	return shadow ? shadow->info : NULL;
+}
+
+static inline struct tcp_authopt_info* get_tcp_tw_authopt_info(struct tcp_timewait_sock *tw) {
+	struct tcp_authopt_sock_shadow* shadow = get_tcp_authopt_shadow((struct sock *)tw);
+	return shadow ? shadow->info : NULL;
+}
+
 #ifdef CONFIG_TCP_AUTHOPT
 extern int sysctl_tcp_authopt;
 DECLARE_STATIC_KEY_FALSE(tcp_authopt_needed);
@@ -83,7 +105,7 @@ static inline struct tcp_authopt_key_info *tcp_authopt_select_key(
 		u8 *rnextkeyid)
 {
 	if (static_branch_unlikely(&tcp_authopt_needed)) {
-		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		struct tcp_authopt_info *info = get_tcp_authopt_info(tcp_sk(sk));
 
 		if (info)
 			return __tcp_authopt_select_key(sk, info, addr_sk, rnextkeyid, true);
@@ -107,7 +129,7 @@ static inline int tcp_authopt_openreq(
 		const struct sock *oldsk,
 		struct request_sock *req)
 {
-	if (!rcu_dereference(tcp_sk(oldsk)->authopt_info))
+	if (!get_tcp_authopt_info(tcp_sk(oldsk)))
 		return 0;
 	else
 		return __tcp_authopt_openreq(newsk, oldsk, req);
@@ -116,15 +138,23 @@ static inline void tcp_authopt_time_wait(
 		struct tcp_timewait_sock *tcptw,
 		struct tcp_sock *tp)
 {
+
 	if (static_branch_unlikely(&tcp_authopt_needed)) {
+		struct tcp_authopt_sock_shadow *old_shadow, *new_shadow;
+
 		/* Transfer ownership of authopt_info to the twsk
 		 * This requires no other users of the origin sock.
 		 */
 		sock_owned_by_me((struct sock *)tp);
-		tcptw->tw_authopt_info = tp->authopt_info;
-		tp->authopt_info = NULL;
-	} else {
-		tcptw->tw_authopt_info = NULL;
+		old_shadow = get_tcp_authopt_shadow((struct sock *)tp);
+		new_shadow = klp_shadow_get_or_alloc((struct sock*)tcptw,
+						     TCP_AUTHOPT_SOCK_SHADOW,
+						     sizeof(*new_shadow),
+						     GFP_KERNEL,
+						     NULL,
+						     NULL);
+		new_shadow->info = old_shadow->info;
+		old_shadow->info = NULL;
 	}
 }
 int __tcp_authopt_inbound_check(
@@ -139,7 +169,7 @@ int __tcp_authopt_inbound_check(
 static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb)
 {
 	if (static_branch_unlikely(&tcp_authopt_needed)) {
-		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		struct tcp_authopt_info *info = get_tcp_authopt_info(tcp_sk(sk));
 
 		if (info)
 			return __tcp_authopt_inbound_check(sk, skb, info);

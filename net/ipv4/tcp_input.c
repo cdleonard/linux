@@ -5786,7 +5786,7 @@ static void tcp_authopt_finish_connect(struct sock *sk, struct sk_buff *skb)
 #ifdef CONFIG_TCP_AUTHOPT
 	struct tcp_authopt_info *info;
 
-	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
+	info = get_tcp_authopt_info(tcp_sk(sk));
 	if (!info)
 		return;
 

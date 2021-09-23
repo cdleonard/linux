@@ -356,10 +356,14 @@ void tcp_twsk_destructor(struct sock *sk)
 #ifdef CONFIG_TCP_AUTHOPT
 	if (static_branch_unlikely(&tcp_authopt_needed)) {
 		struct tcp_timewait_sock *twsk = tcp_twsk(sk);
+		struct tcp_authopt_info *info;
+
+		info = get_tcp_tw_authopt_info(twsk);
 
 		/* twsk only contains sock_common so pass NULL as sk. */
-		if (twsk->tw_authopt_info)
-			tcp_authopt_free(NULL, twsk->tw_authopt_info);
+		if (info)
+			tcp_authopt_free(NULL, info);
+		klp_shadow_free(sk, TCP_AUTHOPT_SOCK_SHADOW, NULL);
 	}
 #endif
 }

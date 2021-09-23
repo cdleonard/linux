@@ -651,9 +651,9 @@ static int tcp_v4_authopt_handle_reply(
 	u8 rnextkeyid;
 
 	if (sk->sk_state == TCP_TIME_WAIT)
-		info = tcp_twsk(sk)->tw_authopt_info;
+		info = get_tcp_tw_authopt_info(tcp_twsk(sk));
 	else
-		info = tcp_sk(sk)->authopt_info;
+		info = get_tcp_authopt_info(tcp_sk(sk));
 	if (!info)
 		return 0;
 	key_info = __tcp_authopt_select_key(sk, info, sk, &rnextkeyid, false);

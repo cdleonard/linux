@@ -831,9 +831,9 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 	if (static_branch_unlikely(&tcp_authopt_needed) && sk)
 	{
 		if (sk->sk_state == TCP_TIME_WAIT)
-			authopt_info = tcp_twsk(sk)->tw_authopt_info;
+			authopt_info = get_tcp_tw_authopt_info(tcp_twsk(sk));
 		else
-			authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
+			authopt_info = get_tcp_authopt_info(tcp_sk(sk));
 
 		if (authopt_info) {
 			authopt_key_info = __tcp_authopt_select_key(sk, authopt_info, sk, &authopt_rnextkeyid, false);
