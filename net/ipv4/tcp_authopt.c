@@ -357,6 +357,7 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(
 
 	return key;
 }
+EXPORT_SYMBOL(__tcp_authopt_select_key);
 
 static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk)
 {
