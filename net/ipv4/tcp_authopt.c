@@ -11,10 +11,8 @@
 #include <net/tcp_authopt.h>
 #include <crypto/hash.h>
 
-/* This is mainly intended to protect against local privilege escalations through
- * a rarely used feature so it is deliberately not namespaced.
- */
-int sysctl_tcp_authopt;
+/* hardcoded to 1 to avoid sysctl in kpatch */
+int sysctl_tcp_authopt = 1;
 
 /* This is enabled when first struct tcp_authopt_info is allocated and never released */
 DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed_key);
