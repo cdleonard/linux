@@ -1907,7 +1907,7 @@ static int tcp_v4_sig_check(struct sock *sk,
 		return ret;
 	if (ret == 1)
 		return 0;
-	return tcp_v4_inbound_md5_hash(sk, skb, dif, sdif, md5);
+	return tcp_v4_inbound_md5_hash(sk, skb, md5);
 }
 
 static int tcp_v4_sig_check_req(struct request_sock *req,
@@ -1927,7 +1927,7 @@ static int tcp_v4_sig_check_req(struct request_sock *req,
 		return ret;
 	if (ret == 1)
 		return 0;
-	return tcp_v4_inbound_md5_hash(lsk, skb, dif, sdif, md5);
+	return tcp_v4_inbound_md5_hash(lsk, skb, md5);
 }
 
 /*
