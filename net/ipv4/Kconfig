@@ -731,11 +731,6 @@ config TCP_MD5SIG
 
 config TCP_AUTHOPT
 	bool "TCP: Authentication Option support (RFC5925)"
-	select CRYPTO
-	select CRYPTO_SHA1
-	select CRYPTO_HMAC
-	select CRYPTO_AES
-	select CRYPTO_CMAC
 	default y
 	help
 	  RFC5925 specifies a new method of giving protection to TCP sessions.
