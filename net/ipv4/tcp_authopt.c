@@ -746,7 +746,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	return 0;
 }
 
-int __tcp_authopt_timewait(struct tcp_timewait_sock *tcptw, struct tcp_sock *tp)
+void __tcp_authopt_time_wait(struct tcp_timewait_sock *tcptw, struct tcp_sock *tp)
 {
 	struct tcp_authopt_sock_shadow *old_shadow, *new_shadow;
 

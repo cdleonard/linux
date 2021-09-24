@@ -134,11 +134,11 @@ static inline int tcp_authopt_openreq(
 	else
 		return __tcp_authopt_openreq(newsk, oldsk, req);
 }
-int __tcp_authopt_timewait(struct tcp_timewait_sock *tcptw, struct tcp_sock *tp);
+void __tcp_authopt_time_wait(struct tcp_timewait_sock *tcptw, struct tcp_sock *tp);
 static inline void tcp_authopt_time_wait(struct tcp_timewait_sock *tcptw, struct tcp_sock *tp)
 {
 	if (static_branch_unlikely(&tcp_authopt_needed))
-		__tcp_authopt_time_wait(tcptw, tp);
+		return __tcp_authopt_time_wait(tcptw, tp);
 }
 int __tcp_authopt_inbound_check(
 		struct sock *sk,
