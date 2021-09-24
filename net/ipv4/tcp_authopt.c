@@ -740,7 +740,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 		return err;
 	}
 	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
-	new_shadow = klp_shadow_alloc(newsk, TCP_AUTHOPT_SOCK_SHADOW, sizeof(*new_shadow), GFP_KERNEL, NULL, NULL);
+	new_shadow = klp_shadow_alloc(newsk, TCP_AUTHOPT_SOCK_SHADOW, sizeof(*new_shadow), GFP_ATOMIC, NULL, NULL);
 	rcu_assign_pointer(new_shadow->info, new_info);
 
 	return 0;
