@@ -746,6 +746,29 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	return 0;
 }
 
+int __tcp_authopt_timewait(struct tcp_timewait_sock *tcptw, struct tcp_sock *tp)
+{
+	struct tcp_authopt_sock_shadow *old_shadow, *new_shadow;
+
+	/* Transfer ownership of authopt_info to the twsk
+		* This requires no other users of the origin sock.
+		*/
+	sock_owned_by_me((struct sock *)tp);
+	old_shadow = get_tcp_authopt_shadow((struct sock *)tp);
+	if (!old_shadow || !old_shadow->info)
+		return;
+
+	new_shadow = klp_shadow_alloc((struct sock*)tcptw,
+					TCP_AUTHOPT_SOCK_SHADOW,
+					sizeof(*new_shadow),
+					GFP_ATOMIC,
+					NULL,
+					NULL);
+	new_shadow->info = old_shadow->info;
+	old_shadow->info = NULL;
+	klp_shadow_free((struct sock *)tp, TCP_AUTHOPT_SOCK_SHADOW, NULL);
+}
+
 /* feed traffic key into shash */
 static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 					 struct sock *sk,

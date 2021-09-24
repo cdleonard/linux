@@ -134,28 +134,11 @@ static inline int tcp_authopt_openreq(
 	else
 		return __tcp_authopt_openreq(newsk, oldsk, req);
 }
-static inline void tcp_authopt_time_wait(
-		struct tcp_timewait_sock *tcptw,
-		struct tcp_sock *tp)
+int __tcp_authopt_timewait(struct tcp_timewait_sock *tcptw, struct tcp_sock *tp);
+static inline void tcp_authopt_time_wait(struct tcp_timewait_sock *tcptw, struct tcp_sock *tp)
 {
-
-	if (static_branch_unlikely(&tcp_authopt_needed)) {
-		struct tcp_authopt_sock_shadow *old_shadow, *new_shadow;
-
-		/* Transfer ownership of authopt_info to the twsk
-		 * This requires no other users of the origin sock.
-		 */
-		sock_owned_by_me((struct sock *)tp);
-		old_shadow = get_tcp_authopt_shadow((struct sock *)tp);
-		new_shadow = klp_shadow_get_or_alloc((struct sock*)tcptw,
-						     TCP_AUTHOPT_SOCK_SHADOW,
-						     sizeof(*new_shadow),
-						     GFP_KERNEL,
-						     NULL,
-						     NULL);
-		new_shadow->info = old_shadow->info;
-		old_shadow->info = NULL;
-	}
+	if (static_branch_unlikely(&tcp_authopt_needed))
+		__tcp_authopt_time_wait(tcptw, tp);
 }
 int __tcp_authopt_inbound_check(
 		struct sock *sk,
