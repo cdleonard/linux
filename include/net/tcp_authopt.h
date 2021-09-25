@@ -139,9 +139,7 @@ static inline struct tcp_authopt_info* get_tcp_tw_authopt_info(struct tcp_timewa
 }
 
 #ifdef CONFIG_TCP_AUTHOPT
-DECLARE_STATIC_KEY_FALSE(tcp_authopt_needed_key);
-#define tcp_authopt_needed (static_branch_unlikely(&tcp_authopt_needed_key))
-extern int sysctl_tcp_authopt;
+extern int tcp_authopt_needed;
 
 void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info);
 void tcp_authopt_clear(struct sock *sk);
