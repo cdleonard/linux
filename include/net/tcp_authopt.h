@@ -7,6 +7,8 @@
 #include <uapi/linux/tcp.h>
 #include <linux/livepatch.h>
 
+#define TCPOPT_AUTHOPT		29	/* Auth Option (RFC5925) */
+
 /* According to RFC5925 the length of the authentication option varies based on
  * the signature algorithm. Linux only implements the algorithms defined in
  * RFC5926 which have a constant length of 16.
