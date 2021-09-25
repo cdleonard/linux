@@ -7,6 +7,9 @@
 #include <uapi/linux/tcp.h>
 #include <linux/livepatch.h>
 
+/* Do not modify kconfig for livepatch */
+#define CONFIG_TCP_AUTHOPT 1
+
 #define TCPOPT_AUTHOPT		29	/* Auth Option (RFC5925) */
 
 /* According to RFC5925 the length of the authentication option varies based on
