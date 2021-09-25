@@ -128,8 +128,10 @@ enum {
 #define TCP_CM_INQ		TCP_INQ
 
 #define TCP_TX_DELAY		37	/* delay outgoing packets by XX usec */
+#ifndef __GENKSYMS__
 #define TCP_AUTHOPT		38	/* TCP Authentication Option (RFC5925) */
 #define TCP_AUTHOPT_KEY		39	/* TCP Authentication Option Key (RFC5925) */
+#endif /* __GENKSYMS__ */
 
 
 #define TCP_REPAIR_ON		1
