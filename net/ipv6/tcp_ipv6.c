@@ -828,7 +828,7 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 		tot_len += TCPOLEN_TSTAMP_ALIGNED;
 #ifdef CONFIG_TCP_AUTHOPT
 	/* Key lookup before SKB allocation */
-	if (static_key_enabled(&tcp_authopt_needed) && sk)
+	if (tcp_authopt_needed && sk)
 	{
 		if (sk->sk_state == TCP_TIME_WAIT)
 			authopt_info = get_tcp_tw_authopt_info(tcp_twsk(sk));
@@ -891,7 +891,7 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 #endif
 #ifdef CONFIG_TCP_AUTHOPT
 	/* Compute the TCP-AO mac. Unlike in the ipv4 case we have a real SKB */
-	if (static_key_enabled(&tcp_authopt_needed) && authopt_key_info)
+	if (tcp_authopt_needed && authopt_key_info)
 	{
 		*topt++ = htonl((TCPOPT_AUTHOPT << 24) |
 				(TCPOLEN_AUTHOPT_OUTPUT << 16) |
