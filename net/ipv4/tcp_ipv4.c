@@ -757,7 +757,7 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 	 *
 	 * FIXME: What about RST in response to SYN?
 	 */
-	if (static_branch_unlikely(&tcp_authopt_needed) && sk && sk->sk_state != TCP_NEW_SYN_RECV && sk->sk_state != TCP_LISTEN) {
+	if (tcp_authopt_needed && sk && sk->sk_state != TCP_NEW_SYN_RECV && sk->sk_state != TCP_LISTEN) {
 		int tcp_authopt_ret = tcp_v4_authopt_handle_reply(sk, skb, rep.opt, &rep.th);
 		if (tcp_authopt_ret) {
 			arg.iov[0].iov_len += tcp_authopt_ret;
@@ -911,7 +911,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 	rep.th.window  = htons(win);
 
 #ifdef CONFIG_TCP_AUTHOPT
-	if (static_branch_unlikely(&tcp_authopt_needed))
+	if (tcp_authopt_needed)
 	{
 		int offset = (tsecr) ? 3 : 0;
 

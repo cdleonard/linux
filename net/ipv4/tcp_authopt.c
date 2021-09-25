@@ -9,7 +9,8 @@
 int sysctl_tcp_authopt = 1;
 
 /* This is enabled when first struct tcp_authopt_info is allocated and never released */
-DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed);
+int tcp_authopt_needed = 0;
+
 /* only for CONFIG_IPV6=m */
 EXPORT_SYMBOL(tcp_authopt_needed);
 
@@ -373,7 +374,8 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 		return ERR_PTR(-ENOMEM);
 
 	/* Never released: */
-	static_branch_inc(&tcp_authopt_needed);
+	++tcp_authopt_needed;
+	wmb();
 	sk_nocaps_add(sk, NETIF_F_GSO_MASK);
 	INIT_HLIST_HEAD(&info->head);
 	rcu_assign_pointer(shadow->info, info);
