@@ -25,6 +25,7 @@
 #include <linux/sysctl.h>
 #include <linux/workqueue.h>
 #include <linux/static_key.h>
+#define CONFIG_TCP_AUTHOPT 1
 #include <net/tcp.h>
 #include <net/inet_common.h>
 #include <net/tcp_authopt.h>

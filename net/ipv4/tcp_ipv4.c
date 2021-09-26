@@ -61,6 +61,7 @@
 #include <net/net_namespace.h>
 #include <net/icmp.h>
 #include <net/inet_hashtables.h>
+#define CONFIG_TCP_AUTHOPT 1
 #include <net/tcp.h>
 #include <net/tcp_authopt.h>
 #include <net/transp_v6.h>

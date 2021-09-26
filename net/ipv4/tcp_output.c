@@ -37,6 +37,7 @@
 
 #define pr_fmt(fmt) "TCP: " fmt
 
+#define CONFIG_TCP_AUTHOPT 1
 #include <net/tcp.h>
 #include <net/tcp_authopt.h>
 

@@ -41,6 +41,7 @@
 #include <linux/random.h>
 #include <linux/indirect_call_wrapper.h>
 
+#define CONFIG_TCP_AUTHOPT 1
 #include <net/tcp.h>
 #include <net/tcp_authopt.h>
 #include <net/ndisc.h>

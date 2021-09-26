@@ -243,6 +243,7 @@
 
 #define pr_fmt(fmt) "TCP: " fmt
 
+#define CONFIG_TCP_AUTHOPT 1
 #include <crypto/hash.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
