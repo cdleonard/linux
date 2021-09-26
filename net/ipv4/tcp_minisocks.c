@@ -347,7 +347,7 @@ EXPORT_SYMBOL(tcp_time_wait);
 void tcp_twsk_destructor(struct sock *sk)
 {
 #ifdef CONFIG_TCP_MD5SIG
-	if (static_branch_unlikely(&tcp_md5_needed)) {
+	if (static_key_enabled(&tcp_md5_needed)) {
 		struct tcp_timewait_sock *twsk = tcp_twsk(sk);
 
 		if (twsk->tw_md5_key)
