@@ -2317,7 +2317,11 @@ static inline void tcp_add_tx_delay(struct sk_buff *skb,
  */
 static inline u64 tcp_transmit_time(const struct sock *sk)
 {
+#ifdef CONFIG_TCP_AUTHOPT
+	if (static_key_enabled(&tcp_tx_delay_enabled)) {
+#else
 	if (static_branch_unlikely(&tcp_tx_delay_enabled)) {
+#endif
 		u32 delay = (sk->sk_state == TCP_TIME_WAIT) ?
 			tcp_twsk(sk)->tw_tx_delay : tcp_sk(sk)->tcp_tx_delay;
 
