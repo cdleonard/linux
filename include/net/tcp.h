@@ -2196,6 +2196,19 @@ int tcp_bpf_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 int __tcp_bpf_recvmsg(struct sock *sk, struct sk_psock *psock,
 		      struct msghdr *msg, int len, int flags);
 
+#define BPF_CGROUP_RUN_PROG_SOCK_OPS__NO_STATIC_BRANCH(sock_ops)	       \
+({									       \
+	int __ret = 0;							       \
+	if (static_key_enabled(&cgroup_bpf_enabled_key) && (sock_ops)->sk) {   \
+		typeof(sk) __sk = sk_to_full_sk((sock_ops)->sk);	       \
+		if (__sk && sk_fullsock(__sk))				       \
+			__ret = __cgroup_bpf_run_filter_sock_ops(__sk,	       \
+								 sock_ops,     \
+							 BPF_CGROUP_SOCK_OPS); \
+	}								       \
+	__ret;								       \
+})
+
 /* Call BPF_SOCK_OPS program that returns an int. If the return value
  * is < 0, then the BPF op failed (for example if the loaded BPF
  * program does not support the chosen operation or there is no BPF
@@ -2218,7 +2231,11 @@ static inline int tcp_call_bpf(struct sock *sk, int op, u32 nargs, u32 *args)
 	if (nargs > 0)
 		memcpy(sock_ops.args, args, nargs * sizeof(*args));
 
+#ifdef CONFIG_TCP_AUTHOPT
+	ret = BPF_CGROUP_RUN_PROG_SOCK_OPS__NO_STATIC_BRANCH(&sock_ops);
+#else
 	ret = BPF_CGROUP_RUN_PROG_SOCK_OPS(&sock_ops);
+#endif
 	if (ret == 0)
 		ret = sock_ops.reply;
 	else
