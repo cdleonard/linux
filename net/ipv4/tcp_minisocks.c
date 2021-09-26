@@ -455,7 +455,7 @@ static void smc_check_reset_syn_req(struct tcp_sock *oldtp,
 #if IS_ENABLED(CONFIG_SMC)
 	struct inet_request_sock *ireq;
 
-	if (static_branch_unlikely(&tcp_have_smc)) {
+	if (static_key_enabled(&tcp_have_smc)) {
 		ireq = inet_rsk(req);
 		if (oldtp->syn_smc && !ireq->smc_ok)
 			newtp->syn_smc = 0;
