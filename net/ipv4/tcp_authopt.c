@@ -4,6 +4,7 @@
 #include <net/tcp.h>
 #include <net/tcp_authopt.h>
 #include <crypto/hash.h>
+#include <qp/qp.h>
 
 /* This is mainly intended to protect against local privilege escalations through
  * a rarely used feature so it is deliberately not namespaced.
@@ -491,6 +492,33 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	return 0;
 }
 
+static void dump_tcp_authopt_sne_info(struct sock *sk, struct tcp_authopt_info *info)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+
+	QP_PRINT_LOC("sk=%p"
+		" rcv_sne=%08x"
+		" rcv_sne_seq=%08x"
+		" rcv_nxt=%08x"
+		" dst_isn=%08x"
+
+		" snd_sne=%08x"
+		" snd_sne_seq=%08x"
+		" snd_nxt=%08x"
+		" src_isn=%08x"
+		"\n",
+		sk,
+		info->rcv_sne,
+		info->rcv_sne_seq,
+		tp->rcv_nxt,
+		info->dst_isn,
+
+		info->snd_sne,
+		info->snd_sne_seq,
+		tp->snd_nxt,
+		info->src_isn);
+}
+
 int tcp_get_repair_authopt_val(struct sock *sk, struct tcp_repair_authopt *opt)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -509,6 +537,7 @@ int tcp_get_repair_authopt_val(struct sock *sk, struct tcp_repair_authopt *opt)
 	opt->dst_isn = info->dst_isn;
 	opt->snd_sne = info->snd_sne;
 	opt->rcv_sne = info->rcv_sne;
+	dump_tcp_authopt_sne_info(sk, info);
 
 	return 0;
 }
@@ -1179,6 +1208,17 @@ static u32 compute_rcv_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u
 	u32 sne;
 
 	sne = update_sne(info->rcv_sne, info->rcv_sne_seq, seq);
+	if (sne != info->rcv_sne)
+		QP_PRINT_LOC("rcv skb sne=%08x seq=%08x"
+			" tp=%p"
+			" rcv_sne=%08x"
+			" rcv_sne_seq=%08x"
+			" dst_isn=%08x"
+			"\n",
+			sne, seq, tp,
+			info->rcv_sne,
+			info->rcv_sne_seq,
+			info->dst_isn);
 	/* FIXME: invalid packets should not update rcv_sne,
 	 * this would allow messing up SNE even without knowing the password.
 	 */
@@ -1195,6 +1235,17 @@ static u32 compute_snd_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u
 	u32 sne;
 
 	sne = update_sne(info->snd_sne, info->snd_sne_seq, seq);
+	if (sne != info->snd_sne)
+		QP_PRINT_LOC("snd skb sne=%08x seq=%08x"
+			" tp=%p"
+			" snd_sne=%08x"
+			" snd_sne_seq=%08x"
+			" src_isn=%08x"
+			"\n",
+			sne, seq, tp,
+			info->snd_sne,
+			info->snd_sne_seq,
+			info->src_isn);
 	if (after(seq, info->snd_sne_seq)) {
 		info->snd_sne = sne;
 		info->snd_sne_seq = seq;
@@ -1560,6 +1611,9 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	if (memcmp(macbuf, opt->mac, TCP_AUTHOPT_MACLEN)) {
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		net_info_ratelimited("TCP Authentication Failed\n");
+		QP_DUMP_TCP_HDR(th);
+		QP_PRINT_LOC("th seq=%08x ack=%08x\n", ntohl(th->seq), ntohl(th->ack_seq));
+		dump_tcp_authopt_sne_info(sk, info);
 		return -EINVAL;
 	}
 
