@@ -4281,6 +4281,28 @@ zerocopy_rcv_out:
 			return -EFAULT;
 		return 0;
 	}
+	case TCP_REPAIR_AUTHOPT: {
+		struct tcp_repair_authopt opt;
+		int err;
+
+		if (get_user(len, optlen))
+			return -EFAULT;
+
+		if (len != sizeof(opt))
+			return -EINVAL;
+
+		if (!tp->repair)
+			return -EINVAL;
+		lock_sock(sk);
+		err = tcp_get_repair_authopt_val(sk, &opt);
+		release_sock(sk);
+
+		if (err)
+			return err;
+		if (copy_to_user(optval, &opt, len))
+			return -EFAULT;
+		return 0;
+	}
 #endif
 
 	default:
