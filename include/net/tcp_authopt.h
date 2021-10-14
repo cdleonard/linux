@@ -49,6 +49,12 @@ struct tcp_authopt_key_info {
 	struct tcp_authopt_alg_imp *alg;
 };
 
+struct tcp_authopt_sne_info {
+	u32 sne;
+	bool sne_flag;
+	u32 prev_seq;
+};
+
 /**
  * struct tcp_authopt_info - Per-socket information regarding tcp_authopt
  *
@@ -99,6 +105,9 @@ struct tcp_authopt_info {
 	 * Linux tries to honor this unless TCP_AUTHOPT_FLAG_LOCK_KEYID is set
 	 */
 	u8 recv_rnextkeyid;
+
+	struct tcp_authopt_sne_info rcv_sne;
+	struct tcp_authopt_sne_info snd_sne;
 };
 
 #ifdef CONFIG_TCP_AUTHOPT
@@ -109,6 +118,7 @@ void tcp_authopt_free(struct sock *sk, struct tcp_authopt_info *info);
 void tcp_authopt_clear(struct sock *sk);
 int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
 int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key);
+int tcp_get_repair_authopt_val(struct sock *sk, struct tcp_repair_authopt *opt);
 int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen);
 struct tcp_authopt_key_info *__tcp_authopt_select_key(
 		const struct sock *sk,

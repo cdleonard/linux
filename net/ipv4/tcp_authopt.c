@@ -4,6 +4,7 @@
 #include <net/tcp.h>
 #include <net/tcp_authopt.h>
 #include <crypto/hash.h>
+#include <qp/qp.h>
 
 /* This is mainly intended to protect against local privilege escalations through
  * a rarely used feature so it is deliberately not namespaced.
@@ -366,6 +367,11 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 }
 EXPORT_SYMBOL(__tcp_authopt_select_key);
 
+static void init_sne(struct tcp_authopt_sne_info *sne)
+{
+	sne->sne_flag = 1;
+}
+
 static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -378,6 +384,9 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	info = kzalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return ERR_PTR(-ENOMEM);
+
+	init_sne(&info->snd_sne);
+	init_sne(&info->rcv_sne);
 
 	/* Never released: */
 	static_branch_inc(&tcp_authopt_needed);
@@ -465,11 +474,11 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	struct tcp_authopt_info *info;
 	struct tcp_authopt_key_info *send_key;
 
+	memset(opt, 0, sizeof(*opt));
 	sock_owned_by_me(sk);
 	if (!sysctl_tcp_authopt)
 		return -EPERM;
 
-	memset(opt, 0, sizeof(*opt));
 	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
 		return -ENOENT;
@@ -487,6 +496,40 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	opt->send_rnextkeyid = info->send_rnextkeyid;
 	opt->recv_keyid = info->recv_keyid;
 	opt->recv_rnextkeyid = info->recv_rnextkeyid;
+
+	return 0;
+}
+
+int tcp_get_repair_authopt_val(struct sock *sk, struct tcp_repair_authopt *opt)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_authopt_info *info;
+
+	memset(opt, 0, sizeof(*opt));
+	sock_owned_by_me(sk);
+	if (!sysctl_tcp_authopt)
+		return -EPERM;
+
+	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	if (!info)
+		return -ENOENT;
+
+	opt->src_isn = info->src_isn;
+	opt->dst_isn = info->dst_isn;
+	opt->rcv_sne = info->rcv_sne.sne;
+	opt->snd_sne = info->snd_sne.sne;
+	QP_PRINT_LOC("sk=%p dst_isn=%08x"
+		" rcv.sne prev_seq=%08x sne_flag=%d sne=%08x\n",
+		tp, info->dst_isn,
+		info->rcv_sne.prev_seq,
+		info->rcv_sne.sne_flag,
+		info->rcv_sne.sne);
+	QP_PRINT_LOC("sk=%p src_isn=%08x"
+		" rcv.sne prev_seq=%08x sne_flag=%d sne=%08x\n",
+		tp, info->src_isn,
+		info->snd_sne.prev_seq,
+		info->snd_sne.sne_flag,
+		info->snd_sne.sne);
 
 	return 0;
 }
@@ -635,6 +678,54 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	return 0;
 }
 
+#define distance(x,y) (((x)<(y))?((y)-(x)):((x)-(y)))
+
+/* Update SNE info for a new packet and return the SNE for that packet.
+ *
+ * Based on https://datatracker.ietf.org/doc/draft-touch-sne/ 
+ */
+u32 compute_sne(struct tcp_authopt_sne_info *info, u32 seq)
+{
+	u32 sne;
+
+	// use current SNE to start
+	sne = info->sne;
+
+	// both in same SNE range?
+	if (distance(seq, info->prev_seq) < 0x80000000) {
+		// jumps fwd over N/2?
+		if ((sne >= 0x80000000) && (info->prev_seq < 0x80000000)) {
+			// reset wrap increment flag
+			info->sne_flag = 0;
+		}
+		// move prev forward if needed
+		info->prev_seq = max(sne, info->prev_seq);
+	} else {
+		// both in diff SNE ranges
+
+		// jumps forward over zero?
+		if (sne < 0x80000000) {
+			// update prev
+			info->prev_seq = sne;
+			// first jump over zero? (wrap)
+			if (info->sne_flag == 0) {
+				// set flag so we increment once
+				info->sne_flag = 1;
+				// increment window
+				info->sne = info->sne + 1;
+				// use updated SNE value
+				sne = info->sne;
+			}
+		} else {
+			// jump backward over zero
+			// use pre-rollover SNE value
+			sne = info->sne - 1;
+		}
+	}
+
+	return sne;
+}
+
 static int tcp_authopt_get_isn(struct sock *sk,
 			       struct sk_buff *skb,
 			       int input,
@@ -763,6 +854,8 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 
 	new_info->src_isn = tcp_rsk(req)->snt_isn;
 	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
+	init_sne(&new_info->snd_sne);
+	init_sne(&new_info->rcv_sne);
 	INIT_HLIST_HEAD(&new_info->head);
 	err = tcp_authopt_clone_keys(newsk, oldsk, new_info, old_info);
 	if (err) {
@@ -1139,6 +1232,54 @@ static int skb_shash_frags(struct shash_desc *desc,
 	return 0;
 }
 
+static struct tcp_authopt_info* hack_get_info(struct sock *sk)
+{
+	if (unlikely(sk->sk_state == TCP_NEW_SYN_RECV))
+		return NULL;
+	if (unlikely(sk->sk_state == TCP_TIME_WAIT))
+		return tcp_twsk(sk)->tw_authopt_info;
+	else
+		return rcu_dereference(tcp_sk(sk)->authopt_info);
+}
+
+static bool sne_debug;
+
+static u32 compute_rcv_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
+{
+	u32 sne;
+
+	sne = compute_sne(&info->rcv_sne, seq);
+	if (sne_debug)
+		QP_PRINT_LOC("rcv skb sne=%08x seq=%08x"
+			" tp=%p"
+			" dst_isn=%08x"
+			" prev_seq=%08x sne_flag=%d sock sne=%08x\n",
+			sne, seq, tp, info->dst_isn,
+			info->rcv_sne.prev_seq,
+			info->rcv_sne.sne_flag,
+			info->rcv_sne.sne);
+
+	return sne;
+}
+
+static u32 compute_snd_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
+{
+	u32 sne;
+
+	sne = compute_sne(&info->snd_sne, seq);
+	if (sne_debug)
+		QP_PRINT_LOC("snd skb sne=%08x seq=%08x tp=%p"
+			" src_isn=%08x"
+			" prev_seq=%08x sne_flag=%d sock sne=%08x\n",
+			sne, seq, tp,
+			info->src_isn,
+			info->snd_sne.prev_seq,
+			info->snd_sne.sne_flag,
+			info->snd_sne.sne);
+
+	return sne;
+}
+
 static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 				   struct sock *sk,
 				   struct sk_buff *skb,
@@ -1147,12 +1288,28 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 				   bool include_options,
 				   u8 *macbuf)
 {
+	struct tcp_authopt_info *info;
 	struct tcphdr *th = tcp_hdr(skb);
 	SHASH_DESC_ON_STACK(desc, tfm);
+	__be32 sne = 0;
 	int err;
 
-	/* NOTE: SNE unimplemented */
-	__be32 sne = 0;
+	info = hack_get_info(sk);
+	if (!info) {
+		// For TCP_NEW_SYN_RECV there is no tcp_authopt_info but SNE is
+		// always zero because we're sending the initial SYN/ACK
+		if (unlikely(sk->sk_state != TCP_NEW_SYN_RECV)) {
+			QP_PRINT_LOC("missing info sk=%p state=%d\n", sk, (int)sk->sk_state);
+			dump_stack();
+		}
+		sne = 0;
+	} else {
+		if (input)
+			sne = htonl(compute_rcv_sne(tcp_sk(sk), info, ntohl(th->seq)));
+		else
+			sne = htonl(compute_snd_sne(tcp_sk(sk), info, ntohl(th->seq)));
+	}
+	//QP_PRINT_LOC("sne=%08x\n", sne);
 
 	desc->tfm = tfm;
 	err = crypto_shash_init(desc);
