@@ -3519,6 +3519,7 @@ static void tcp_rcv_nxt_update(struct tcp_sock *tp, u32 seq)
 	u32 delta = seq - tp->rcv_nxt;
 
 	sock_owned_by_me((struct sock *)tp);
+	tcp_authopt_update_rcv_sne(tp, seq);
 	tp->bytes_received += delta;
 	WRITE_ONCE(tp->rcv_nxt, seq);
 }
@@ -5998,6 +5999,8 @@ static void tcp_authopt_finish_connect(struct sock *sk, struct sk_buff *skb)
 
 	info->src_isn = ntohl(tcp_hdr(skb)->ack_seq) - 1;
 	info->dst_isn = ntohl(tcp_hdr(skb)->seq);
+	info->snd_sne = tcp_sk(sk)->snd_nxt < info->src_isn;
+	info->rcv_sne = tcp_sk(sk)->rcv_nxt < info->dst_isn;
 #endif
 }
 
