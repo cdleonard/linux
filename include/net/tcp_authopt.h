@@ -101,7 +101,9 @@ struct tcp_authopt_info {
 	u8 recv_rnextkeyid;
 
 	u32 rcv_sne;
+	u32 rcv_sne_seq;
 	u32 snd_sne;
+	u32 snd_sne_seq;
 };
 
 #ifdef CONFIG_TCP_AUTHOPT

@@ -783,8 +783,8 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	if (!new_info)
 		return -ENOMEM;
 
-	new_info->src_isn = tcp_rsk(req)->snt_isn;
-	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
+	new_info->snd_sne_seq = new_info->src_isn = tcp_rsk(req)->snt_isn;
+	new_info->rcv_sne_seq = new_info->dst_isn = tcp_rsk(req)->rcv_isn;
 	INIT_HLIST_HEAD(&new_info->head);
 	err = tcp_authopt_clone_keys(newsk, oldsk, new_info, old_info);
 	if (err) {
@@ -1168,7 +1168,7 @@ static u32 update_sne(u32 sne, u32 prev_seq, u32 seq)
 			--sne;
 	} else {
 		if (seq < prev_seq)
-			--sne;
+			++sne;
 	}
 
 	return sne;
@@ -1176,27 +1176,29 @@ static u32 update_sne(u32 sne, u32 prev_seq, u32 seq)
 
 static u32 compute_rcv_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
 {
-	u32 sne, prev_seq;
+	u32 sne;
 
-	prev_seq = tp->rcv_nxt;
-	sne = update_sne(info->rcv_sne, prev_seq, seq);
+	sne = update_sne(info->rcv_sne, info->rcv_sne_seq, seq);
 	/* FIXME: invalid packets should not update rcv_sne,
 	 * this would allow messing up SNE even without knowing the password.
 	 */
-	if (after(seq, prev_seq))
+	if (after(seq, info->rcv_sne_seq)) {
 		info->rcv_sne = sne;
+		info->rcv_sne_seq = seq;
+	}
 
 	return sne;
 }
 
 static u32 compute_snd_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
 {
-	u32 sne, prev_seq;
+	u32 sne;
 
-	prev_seq = tp->snd_nxt;
-	sne = update_sne(info->snd_sne, prev_seq, seq);
-	if (after(seq, prev_seq))
+	sne = update_sne(info->snd_sne, info->snd_sne_seq, seq);
+	if (after(seq, info->snd_sne_seq)) {
 		info->snd_sne = sne;
+		info->snd_sne_seq = seq;
+	}
 
 	return sne;
 }
