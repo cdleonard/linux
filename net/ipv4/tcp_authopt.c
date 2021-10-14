@@ -1161,6 +1161,73 @@ static int skb_shash_frags(struct shash_desc *desc,
 	return 0;
 }
 
+static u32 update_sne(u32 sne, u32 prev_seq, u32 seq)
+{
+	if (before(seq, prev_seq)) {
+		if (seq > prev_seq)
+			--sne;
+	} else {
+		if (seq < prev_seq)
+			--sne;
+	}
+
+	return sne;
+}
+
+static u32 compute_rcv_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
+{
+	u32 sne, prev_seq;
+
+	prev_seq = tp->rcv_nxt;
+	sne = update_sne(info->rcv_sne, prev_seq, seq);
+	/* FIXME: invalid packets should not update rcv_sne,
+	 * this would allow messing up SNE even without knowing the password.
+	 */
+	if (after(seq, prev_seq))
+		info->rcv_sne = sne;
+
+	return sne;
+}
+
+static u32 compute_snd_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
+{
+	u32 sne, prev_seq;
+
+	prev_seq = tp->snd_nxt;
+	sne = update_sne(info->snd_sne, prev_seq, seq);
+	if (after(seq, prev_seq))
+		info->snd_sne = sne;
+
+	return sne;
+}
+
+static __be32 compute_sne(struct sock *sk, u32 seq, bool input)
+{
+	struct tcp_authopt_info *info;
+
+	// We can't use normal SNE computation before reaching TCP_ESTABLISHED
+	// For TCP_SYN_SENT the dst_isn field is initialized only after we
+	// validate the remote SYN/ACK
+	// For TCP_NEW_SYN_RECV there is no tcp_authopt_info at all
+	if (sk->sk_state == TCP_SYN_SENT || sk->sk_state == TCP_NEW_SYN_RECV || sk->sk_state == TCP_LISTEN)
+		return 0;
+
+	if (sk->sk_state == TCP_TIME_WAIT)
+		info = tcp_twsk(sk)->tw_authopt_info;
+	else
+		info = rcu_dereference(tcp_sk(sk)->authopt_info);
+
+	if (!info) {
+		WARN_ONCE(!info, "missing tcp_authopt_info sk=%p state=%d\n", sk, (int)sk->sk_state);
+		return 0;
+	}
+
+	if (input)
+		return htonl(compute_rcv_sne(tcp_sk(sk), info, seq));
+	else
+		return htonl(compute_snd_sne(tcp_sk(sk), info, seq));
+}
+
 static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 				   struct sock *sk,
 				   struct sk_buff *skb,
@@ -1171,10 +1238,10 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 {
 	struct tcphdr *th = tcp_hdr(skb);
 	SHASH_DESC_ON_STACK(desc, tfm);
+	__be32 sne;
 	int err;
 
-	/* NOTE: SNE unimplemented */
-	__be32 sne = 0;
+	sne = compute_sne(sk, ntohl(th->seq), input);
 
 	desc->tfm = tfm;
 	err = crypto_shash_init(desc);

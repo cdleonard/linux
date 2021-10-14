@@ -99,6 +99,9 @@ struct tcp_authopt_info {
 	 * Linux tries to honor this unless TCP_AUTHOPT_FLAG_LOCK_KEYID is set
 	 */
 	u8 recv_rnextkeyid;
+
+	u32 rcv_sne;
+	u32 snd_sne;
 };
 
 #ifdef CONFIG_TCP_AUTHOPT
