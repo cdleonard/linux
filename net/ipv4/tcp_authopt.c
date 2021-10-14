@@ -569,6 +569,30 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	return 0;
 }
 
+int tcp_get_repair_authopt_val(struct sock *sk, struct tcp_repair_authopt *opt)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_authopt_info *info;
+	int err;
+
+	memset(opt, 0, sizeof(*opt));
+	sock_owned_by_me(sk);
+	err = check_sysctl_tcp_authopt();
+	if (err)
+		return err;
+
+	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	if (!info)
+		return -ENOENT;
+
+	opt->src_isn = info->src_isn;
+	opt->dst_isn = info->dst_isn;
+	opt->snd_sne = info->snd_sne;
+	opt->rcv_sne = info->rcv_sne;
+
+	return 0;
+}
+
 /* Free key nicely, for living sockets */
 static void tcp_authopt_key_del(struct sock *sk,
 				struct tcp_authopt_info *info,
