@@ -465,11 +465,11 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	struct tcp_authopt_info *info;
 	struct tcp_authopt_key_info *send_key;
 
+	memset(opt, 0, sizeof(*opt));
 	sock_owned_by_me(sk);
 	if (!sysctl_tcp_authopt)
 		return -EPERM;
 
-	memset(opt, 0, sizeof(*opt));
 	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
 		return -ENOENT;
