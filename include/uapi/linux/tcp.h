@@ -130,6 +130,7 @@ enum {
 #define TCP_TX_DELAY		37	/* delay outgoing packets by XX usec */
 #define TCP_AUTHOPT		38	/* TCP Authentication Option (RFC5925) */
 #define TCP_AUTHOPT_KEY		39	/* TCP Authentication Option Key (RFC5925) */
+#define TCP_REPAIR_AUTHOPT	40	/* Repair information for TCP-AO */
 
 
 #define TCP_REPAIR_ON		1
@@ -463,6 +464,13 @@ struct tcp_authopt_key {
 	 * This is similar to `tcp_msg5sig.tcpm_ifindex`
 	 */
 	int	ifindex;
+};
+
+struct tcp_repair_authopt {
+	__u32	src_isn;
+	__u32	dst_isn;
+	__u32	snd_sne;
+	__u32	rcv_sne;
 };
 
 /* setsockopt(fd, IPPROTO_TCP, TCP_ZEROCOPY_RECEIVE, ...) */
