@@ -784,7 +784,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 		return -ENOMEM;
 
 	new_info->snd_sne_seq = new_info->src_isn = tcp_rsk(req)->snt_isn;
-	new_info->rcv_sne_seq = new_info->dst_isn = tcp_rsk(req)->rcv_isn;
+	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
 	INIT_HLIST_HEAD(&new_info->head);
 	err = tcp_authopt_clone_keys(newsk, oldsk, new_info, old_info);
 	if (err) {
@@ -1161,7 +1161,16 @@ static int skb_shash_frags(struct shash_desc *desc,
 	return 0;
 }
 
-static u32 update_sne(u32 sne, u32 prev_seq, u32 seq)
+/* compute_sne - Calculate Sequence Number Extension
+ *
+ * Give old upper/lower 32bit values and a new lower 32bit value determine the
+ * new value of the upper 32 bit. The new sequence number can be 2^31 before or
+ * after prev_seq but TCP window scaling should limit this further.
+ *
+ * For correct accounting the stored SNE value should be only updated together
+ * with the SEQ.
+ */
+static u32 compute_sne(u32 sne, u32 prev_seq, u32 seq)
 {
 	if (before(seq, prev_seq)) {
 		if (seq > prev_seq)
@@ -1174,27 +1183,12 @@ static u32 update_sne(u32 sne, u32 prev_seq, u32 seq)
 	return sne;
 }
 
-static u32 compute_rcv_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
+/* Compute new SNE and also update if after snd_sne_seq */
+static u32 update_snd_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
 {
 	u32 sne;
 
-	sne = update_sne(info->rcv_sne, info->rcv_sne_seq, seq);
-	/* FIXME: invalid packets should not update rcv_sne,
-	 * this would allow messing up SNE even without knowing the password.
-	 */
-	if (after(seq, info->rcv_sne_seq)) {
-		info->rcv_sne = sne;
-		info->rcv_sne_seq = seq;
-	}
-
-	return sne;
-}
-
-static u32 compute_snd_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
-{
-	u32 sne;
-
-	sne = update_sne(info->snd_sne, info->snd_sne_seq, seq);
+	sne = compute_sne(info->snd_sne, info->snd_sne_seq, seq);
 	if (after(seq, info->snd_sne_seq)) {
 		info->snd_sne = sne;
 		info->snd_sne_seq = seq;
@@ -1203,9 +1197,18 @@ static u32 compute_snd_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u
 	return sne;
 }
 
-static __be32 compute_sne(struct sock *sk, u32 seq, bool input)
+/* Update rcv_sne, must be called immediately before rcv_nxt update */
+void __tcp_authopt_update_rcv_sne(struct tcp_sock *tp,
+				 struct tcp_authopt_info *info, u32 seq)
+{
+	info->rcv_sne = compute_sne(info->rcv_sne, tp->rcv_nxt, seq);
+}
+
+/* Compute SNE for a specific packet (by seq). */
+static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input)
 {
 	struct tcp_authopt_info *info;
+	u32 rcv_nxt;
 
 	// We can't use normal SNE computation before reaching TCP_ESTABLISHED
 	// For TCP_SYN_SENT the dst_isn field is initialized only after we
@@ -1214,10 +1217,13 @@ static __be32 compute_sne(struct sock *sk, u32 seq, bool input)
 	if (sk->sk_state == TCP_SYN_SENT || sk->sk_state == TCP_NEW_SYN_RECV || sk->sk_state == TCP_LISTEN)
 		return 0;
 
-	if (sk->sk_state == TCP_TIME_WAIT)
+	if (sk->sk_state == TCP_TIME_WAIT) {
+		rcv_nxt = tcp_twsk(sk)->tw_rcv_nxt;
 		info = tcp_twsk(sk)->tw_authopt_info;
-	else
+	} else {
+		rcv_nxt = tcp_sk(sk)->rcv_nxt;
 		info = rcu_dereference(tcp_sk(sk)->authopt_info);
+	}
 
 	if (!info) {
 		WARN_ONCE(!info, "missing tcp_authopt_info sk=%p state=%d\n", sk, (int)sk->sk_state);
@@ -1225,9 +1231,9 @@ static __be32 compute_sne(struct sock *sk, u32 seq, bool input)
 	}
 
 	if (input)
-		return htonl(compute_rcv_sne(tcp_sk(sk), info, seq));
+		return htonl(compute_sne(info->rcv_sne, rcv_nxt, seq));
 	else
-		return htonl(compute_snd_sne(tcp_sk(sk), info, seq));
+		return htonl(update_snd_sne(tcp_sk(sk), info, seq));
 }
 
 static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
@@ -1243,7 +1249,7 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 	__be32 sne;
 	int err;
 
-	sne = compute_sne(sk, ntohl(th->seq), input);
+	sne = compute_packet_sne(sk, ntohl(th->seq), input);
 
 	desc->tfm = tfm;
 	err = crypto_shash_init(desc);

@@ -100,9 +100,11 @@ struct tcp_authopt_info {
 	 */
 	u8 recv_rnextkeyid;
 
+	/** @rcv_sne: Recv-side Sequence Number Extension of tcp_sock.rcv_nxt */
 	u32 rcv_sne;
-	u32 rcv_sne_seq;
+	/** @snd_sne: Send-side Sequence Number Extension of snd_sne_seq */
 	u32 snd_sne;
+	/** @snd_sne_seq: High send sequence number */
 	u32 snd_sne_seq;
 };
 
@@ -192,6 +194,16 @@ static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb
 
 	return 0;
 }
+void __tcp_authopt_update_rcv_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq);
+static inline void tcp_authopt_update_rcv_sne(struct tcp_sock *tp, u32 seq)
+{
+	if (static_branch_unlikely(&tcp_authopt_needed)) {
+		struct tcp_authopt_info *info = rcu_dereference(tp->authopt_info);
+
+		if (info)
+			return __tcp_authopt_update_rcv_sne(tp, info, seq);
+	}
+}
 #else
 static inline int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 {
@@ -239,6 +251,9 @@ static inline void tcp_authopt_time_wait(
 static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb)
 {
 	return 0;
+}
+static inline void tcp_authopt_inbound_check(struct tcp_sock *tp, u32 seq)
+{
 }
 #endif
 
