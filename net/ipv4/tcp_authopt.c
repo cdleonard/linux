@@ -4,6 +4,9 @@
 #include <net/tcp.h>
 #include <net/tcp_authopt.h>
 #include <crypto/hash.h>
+#include <qp/qp.h>
+
+#pragma GCC optimize("O0")
 
 /* This is mainly intended to protect against local privilege escalations through
  * a rarely used feature so it is deliberately not namespaced.
