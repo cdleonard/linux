@@ -5997,7 +5997,7 @@ static void tcp_authopt_finish_connect(struct sock *sk, struct sk_buff *skb)
 	if (!info)
 		return;
 
-	info->snd_sne_seq = info->src_isn = ntohl(tcp_hdr(skb)->ack_seq) - 1;
+	info->src_isn = ntohl(tcp_hdr(skb)->ack_seq) - 1;
 	info->dst_isn = ntohl(tcp_hdr(skb)->seq);
 #endif
 }

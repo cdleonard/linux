@@ -783,7 +783,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	if (!new_info)
 		return -ENOMEM;
 
-	new_info->snd_sne_seq = new_info->src_isn = tcp_rsk(req)->snt_isn;
+	new_info->src_isn = tcp_rsk(req)->snt_isn;
 	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
 	INIT_HLIST_HEAD(&new_info->head);
 	err = tcp_authopt_clone_keys(newsk, oldsk, new_info, old_info);
@@ -1183,32 +1183,25 @@ static u32 compute_sne(u32 sne, u32 prev_seq, u32 seq)
 	return sne;
 }
 
-/* Compute new SNE and also update if after snd_sne_seq */
-static u32 update_snd_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq)
-{
-	u32 sne;
-
-	sne = compute_sne(info->snd_sne, info->snd_sne_seq, seq);
-	if (after(seq, info->snd_sne_seq)) {
-		info->snd_sne = sne;
-		info->snd_sne_seq = seq;
-	}
-
-	return sne;
-}
-
 /* Update rcv_sne, must be called immediately before rcv_nxt update */
 void __tcp_authopt_update_rcv_sne(struct tcp_sock *tp,
-				 struct tcp_authopt_info *info, u32 seq)
+				  struct tcp_authopt_info *info, u32 seq)
 {
 	info->rcv_sne = compute_sne(info->rcv_sne, tp->rcv_nxt, seq);
+}
+
+/* Update snd_sne, must be called immediately before snd_nxt update */
+void __tcp_authopt_update_snd_sne(struct tcp_sock *tp,
+				  struct tcp_authopt_info *info, u32 seq)
+{
+	info->snd_sne = compute_sne(info->snd_sne, tp->snd_nxt, seq);
 }
 
 /* Compute SNE for a specific packet (by seq). */
 static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input)
 {
 	struct tcp_authopt_info *info;
-	u32 rcv_nxt;
+	u32 rcv_nxt, snd_nxt;
 
 	// We can't use normal SNE computation before reaching TCP_ESTABLISHED
 	// For TCP_SYN_SENT the dst_isn field is initialized only after we
@@ -1219,9 +1212,11 @@ static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input)
 
 	if (sk->sk_state == TCP_TIME_WAIT) {
 		rcv_nxt = tcp_twsk(sk)->tw_rcv_nxt;
+		snd_nxt = tcp_twsk(sk)->tw_snd_nxt;
 		info = tcp_twsk(sk)->tw_authopt_info;
 	} else {
 		rcv_nxt = tcp_sk(sk)->rcv_nxt;
+		snd_nxt = tcp_sk(sk)->snd_nxt;
 		info = rcu_dereference(tcp_sk(sk)->authopt_info);
 	}
 
@@ -1233,7 +1228,7 @@ static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input)
 	if (input)
 		return htonl(compute_sne(info->rcv_sne, rcv_nxt, seq));
 	else
-		return htonl(update_snd_sne(tcp_sk(sk), info, seq));
+		return htonl(compute_sne(info->snd_sne, snd_nxt, seq));
 }
 
 static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
