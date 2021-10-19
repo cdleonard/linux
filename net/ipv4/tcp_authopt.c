@@ -1519,6 +1519,27 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 	return result;
 }
 
+/* Show a rate-limited message for authentication fail */
+static void print_tcpao_notice(const char *msg, struct sk_buff *skb)
+{
+	struct iphdr *iph = (struct iphdr *)skb_network_header(skb);
+	struct tcphdr *th = (struct tcphdr *)skb_transport_header(skb);
+
+	if (iph->version == 4) {
+		net_info_ratelimited("%s (%pI4, %d)->(%pI4, %d)\n", msg,
+				     &iph->saddr, ntohs(th->source),
+				     &iph->daddr, ntohs(th->dest));
+	} else if (iph->version == 6) {
+		struct ipv6hdr *ip6h = (struct ipv6hdr *)skb_network_header(skb);
+
+		net_info_ratelimited("%s (%pI6, %d)->(%pI6, %d)\n", msg,
+				     &ip6h->saddr, ntohs(th->source),
+				     &ip6h->daddr, ntohs(th->dest));
+	} else {
+		WARN_ONCE(1, "%s unknown IP version\n", msg);
+	}
+}
+
 int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp_authopt_info *info)
 {
 	struct tcphdr *th = (struct tcphdr *)skb_transport_header(skb);
@@ -1534,7 +1555,7 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	 * discard the segment.
 	 */
 	if (opt && tcp_parse_md5sig_option(th)) {
-		net_info_ratelimited("TCP AO and MD5 both present on same packet: discarded\n");
+		print_tcpao_notice("TCP AO and MD5 both present on same packet: discarded", skb);
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		return -EINVAL;
 	}
@@ -1546,7 +1567,7 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		return 0;
 	if (!opt && key) {
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
-		net_info_ratelimited("TCP Authentication Missing\n");
+		print_tcpao_notice("TCP Authentication Missing", skb);
 		return -EINVAL;
 	}
 	if (opt && !key) {
@@ -1558,10 +1579,10 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		 */
 		if (info->flags & TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED) {
 			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
-			net_info_ratelimited("TCP Authentication Unexpected: Rejected\n");
+			print_tcpao_notice("TCP Authentication Unexpected: Rejected", skb);
 			return -EINVAL;
 		}
-		net_info_ratelimited("TCP Authentication Unexpected: Accepted\n");
+		print_tcpao_notice("TCP Authentication Unexpected: Accepted", skb);
 		goto accept;
 	}
 
@@ -1575,7 +1596,7 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 
 	if (memcmp(macbuf, opt->mac, TCP_AUTHOPT_MACLEN)) {
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
-		net_info_ratelimited("TCP Authentication Failed\n");
+		print_tcpao_notice("TCP Authentication Failed", skb);
 		return -EINVAL;
 	}
 
