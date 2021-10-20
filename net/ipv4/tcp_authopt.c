@@ -1198,7 +1198,7 @@ static int compute_packet_sne(struct sock *sk, struct tcp_authopt_info *info,
 		snd_nxt = tcp_sk(sk)->snd_nxt;
 	}
 
-	if (WARN_ONCE(!info, "unexpected missing info for sk=%p", sk))
+	if (WARN_ONCE(!info, "unexpected missing info for sk=%p sk_state=%d", sk, sk->sk_state))
 		return -EINVAL;
 
 	if (input)
@@ -1345,6 +1345,7 @@ out:
  */
 int tcp_authopt_hash(char *hash_location,
 		     struct tcp_authopt_key_info *key,
+		     struct tcp_authopt_info *info,
 		     struct sock *sk,
 		     struct sk_buff *skb)
 {
@@ -1352,21 +1353,7 @@ int tcp_authopt_hash(char *hash_location,
 	 * buffer to be large enough so we use a buffer on the stack.
 	 */
 	u8 macbuf[TCP_AUTHOPT_MAXMACBUF];
-	struct tcp_authopt_info *info;
 	int err;
-
-	if (sk->sk_state == TCP_TIME_WAIT) {
-		info = tcp_twsk(sk)->tw_authopt_info;
-	} else if (unlikely(sk->sk_state == TCP_NEW_SYN_RECV)) {
-		// This needs to be tolerated for output address. Pass info from above?
-		info = NULL;
-	} else if (unlikely(!sk_fullsock(sk))) {
-		WARN_ONCE(1, "bad minisock sk=%p state=%d\n", sk, sk->sk_state);
-		err = -EINVAL;
-		goto fail;
-	} else {
-		info = rcu_dereference(tcp_sk(sk)->authopt_info);
-	}
 
 	err = __tcp_authopt_calc_mac(sk, skb, key, info, false, macbuf);
 	if (err)
