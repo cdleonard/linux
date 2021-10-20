@@ -125,19 +125,21 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(
 static inline struct tcp_authopt_key_info *tcp_authopt_select_key(
 		const struct sock *sk,
 		const struct sock *addr_sk,
+		struct tcp_authopt_info **info,
 		u8 *rnextkeyid)
 {
 	if (static_branch_unlikely(&tcp_authopt_needed)) {
-		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		*info = rcu_dereference(tcp_sk(sk)->authopt_info);
 
-		if (info)
-			return __tcp_authopt_select_key(sk, info, addr_sk, rnextkeyid, true);
+		if (*info)
+			return __tcp_authopt_select_key(sk, *info, addr_sk, rnextkeyid, true);
 	}
 	return NULL;
 }
 int tcp_authopt_hash(
 		char *hash_location,
 		struct tcp_authopt_key_info *key,
+		struct tcp_authopt_info *info,
 		struct sock *sk, struct sk_buff *skb);
 int tcp_v4_authopt_hash_reply(
 		char *hash_location,
@@ -237,16 +239,10 @@ static inline int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigne
 {
 	return -ENOPROTOOPT;
 }
-static inline struct tcp_authopt_key_info *tcp_authopt_select_key(
-		const struct sock *sk,
-		const struct sock *addr_sk,
-		u8 *rnextkeyid)
-{
-	return NULL;
-}
 static inline int tcp_authopt_hash(
 		char *hash_location,
 		struct tcp_authopt_key_info *key,
+		struct tcp_authopt_key *info,
 		struct sock *sk, struct sk_buff *skb)
 {
 	return -EINVAL;
