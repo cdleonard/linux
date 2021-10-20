@@ -1198,7 +1198,7 @@ void __tcp_authopt_update_snd_sne(struct tcp_sock *tp,
 }
 
 /* Compute SNE for a specific packet (by seq). */
-static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input)
+static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input, __be32 *sne)
 {
 	struct tcp_authopt_info *info;
 	u32 rcv_nxt, snd_nxt;
@@ -1207,8 +1207,10 @@ static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input)
 	// For TCP_SYN_SENT the dst_isn field is initialized only after we
 	// validate the remote SYN/ACK
 	// For TCP_NEW_SYN_RECV there is no tcp_authopt_info at all
-	if (sk->sk_state == TCP_SYN_SENT || sk->sk_state == TCP_NEW_SYN_RECV || sk->sk_state == TCP_LISTEN)
+	if (sk->sk_state == TCP_SYN_SENT || sk->sk_state == TCP_NEW_SYN_RECV || sk->sk_state == TCP_LISTEN) {
+		*sne = 0;
 		return 0;
+	}
 
 	if (sk->sk_state == TCP_TIME_WAIT) {
 		rcv_nxt = tcp_twsk(sk)->tw_rcv_nxt;
@@ -1221,14 +1223,19 @@ static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input)
 	}
 
 	if (!info) {
-		WARN_ONCE(!info, "missing tcp_authopt_info sk=%p state=%d\n", sk, (int)sk->sk_state);
-		return 0;
+		/* This can happen if socket is closed while stack is sending packets.
+		 * Maybe the correct fix would be to only rcu_dereference once
+		 * for each packet being sent?
+		 */
+		return -EINVAL;
 	}
 
 	if (input)
-		return htonl(compute_sne(info->rcv_sne, rcv_nxt, seq));
+		*sne = htonl(compute_sne(info->rcv_sne, rcv_nxt, seq));
 	else
-		return htonl(compute_sne(info->snd_sne, snd_nxt, seq));
+		*sne = htonl(compute_sne(info->snd_sne, snd_nxt, seq));
+
+	return 0;
 }
 
 static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
@@ -1241,10 +1248,12 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 {
 	struct tcphdr *th = tcp_hdr(skb);
 	SHASH_DESC_ON_STACK(desc, tfm);
-	__be32 sne;
+	__be32 sne = 0;
 	int err;
 
-	sne = compute_packet_sne(sk, ntohl(th->seq), input);
+	err = compute_packet_sne(sk, ntohl(th->seq), input, &sne);
+	if (err)
+		return err;
 
 	desc->tfm = tfm;
 	err = crypto_shash_init(desc);
