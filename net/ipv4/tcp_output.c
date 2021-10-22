@@ -448,6 +448,7 @@ struct tcp_out_options {
 	struct tcp_fastopen_cookie *fastopen_cookie;	/* Fast open cookie */
 	struct mptcp_out_options mptcp;
 #ifdef CONFIG_TCP_AUTHOPT
+	struct tcp_authopt_info *authopt_info;
 	struct tcp_authopt_key_info *authopt_key;
 #endif
 };
@@ -783,7 +784,7 @@ static int tcp_authopt_init_options(const struct sock *sk,
 #ifdef CONFIG_TCP_AUTHOPT
 	struct tcp_authopt_key_info *key;
 
-	key = tcp_authopt_select_key(sk, addr_sk, &opts->authopt_rnextkeyid);
+	key = tcp_authopt_select_key(sk, addr_sk, &opts->authopt_info, &opts->authopt_rnextkeyid);
 	if (key) {
 		opts->options |= OPTION_AUTHOPT;
 		opts->authopt_key = key;
@@ -1418,7 +1419,7 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 #ifdef CONFIG_TCP_AUTHOPT
 	if (opts.authopt_key) {
 		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
-		tcp_authopt_hash(opts.hash_location, opts.authopt_key, sk, skb);
+		tcp_authopt_hash(opts.hash_location, opts.authopt_key, opts.authopt_info, sk, skb);
 	}
 	rcu_read_unlock();
 #endif
@@ -3675,7 +3676,11 @@ struct sk_buff *tcp_make_synack(const struct sock *sk, struct dst_entry *dst,
 #ifdef CONFIG_TCP_AUTHOPT
 	/* If signature fails we do nothing */
 	if (opts.authopt_key)
-		tcp_authopt_hash(opts.hash_location, opts.authopt_key, req_to_sk(req), skb);
+		tcp_authopt_hash(opts.hash_location,
+				 opts.authopt_key,
+				 opts.authopt_info,
+				 req_to_sk(req),
+				 skb);
 	rcu_read_unlock();
 #endif
 
