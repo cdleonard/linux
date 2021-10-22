@@ -1241,6 +1241,7 @@ static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input, __be32 *s
 static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 				   struct sock *sk,
 				   struct sk_buff *skb,
+				   struct tcp_authopt_info *info,
 				   bool input,
 				   bool ipv6,
 				   bool include_options,
@@ -1251,7 +1252,7 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 	__be32 sne = 0;
 	int err;
 
-	err = compute_packet_sne(sk, ntohl(th->seq), input, &sne);
+	err = compute_packet_sne(sk, info, ntohl(th->seq), input, &sne);
 	if (err)
 		return err;
 
@@ -1330,6 +1331,7 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 static int __tcp_authopt_calc_mac(struct sock *sk,
 				  struct sk_buff *skb,
 				  struct tcp_authopt_key_info *key,
+				  struct tcp_authopt_info *info,
 				  bool input,
 				  char *macbuf)
 {
@@ -1355,6 +1357,7 @@ static int __tcp_authopt_calc_mac(struct sock *sk,
 	err = tcp_authopt_hash_packet(mac_tfm,
 				      sk,
 				      skb,
+				      info,
 				      input,
 				      ipv6,
 				      !(key->flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS),
@@ -1371,6 +1374,7 @@ out:
  */
 int tcp_authopt_hash(char *hash_location,
 		     struct tcp_authopt_key_info *key,
+		     struct tcp_authopt_info *info,
 		     struct sock *sk,
 		     struct sk_buff *skb)
 {
@@ -1380,17 +1384,19 @@ int tcp_authopt_hash(char *hash_location,
 	u8 macbuf[TCP_AUTHOPT_MAXMACBUF];
 	int err;
 
-	err = __tcp_authopt_calc_mac(sk, skb, key, false, macbuf);
-	if (err) {
-		/* If mac calculation fails and caller doesn't handle the error
-		 * try to make it obvious inside the packet.
-		 */
-		memset(hash_location, 0, TCP_AUTHOPT_MACLEN);
-		return err;
-	}
+	err = __tcp_authopt_calc_mac(sk, skb, key, info, false, macbuf);
+	if (err)
+		goto fail;
 	memcpy(hash_location, macbuf, TCP_AUTHOPT_MACLEN);
 
 	return 0;
+
+fail:
+	/* If mac calculation fails and caller doesn't handle the error
+		* try to make it obvious inside the packet.
+		*/
+	memset(hash_location, 0, TCP_AUTHOPT_MACLEN);
+	return err;
 }
 EXPORT_SYMBOL(tcp_authopt_hash);
 
@@ -1586,7 +1592,7 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	if (opt->len != TCPOLEN_AUTHOPT_OUTPUT)
 		return -EINVAL;
 
-	err = __tcp_authopt_calc_mac(sk, skb, key, true, macbuf);
+	err = __tcp_authopt_calc_mac(sk, skb, key, info, true, macbuf);
 	if (err)
 		return err;
 
