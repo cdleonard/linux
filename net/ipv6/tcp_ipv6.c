@@ -991,7 +991,11 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 				(TCPOLEN_AUTHOPT_OUTPUT << 16) |
 				(authopt_key_info->send_id << 8) |
 				(authopt_rnextkeyid));
-		tcp_authopt_hash((char *)topt, authopt_key_info, (struct sock *)sk, buff);
+		tcp_authopt_hash((char *)topt,
+				 authopt_key_info,
+				 authopt_info,
+				 (struct sock *)sk,
+				 buff);
 	}
 #endif
 
