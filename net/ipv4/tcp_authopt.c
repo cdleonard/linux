@@ -1176,37 +1176,30 @@ void __tcp_authopt_update_snd_sne(struct tcp_sock *tp,
 }
 
 /* Compute SNE for a specific packet (by seq). */
-static __be32 compute_packet_sne(struct sock *sk, u32 seq, bool input, __be32 *sne)
+static int compute_packet_sne(struct sock *sk, struct tcp_authopt_info *info,
+				 u32 seq, bool input, __be32 *sne)
 {
-	struct tcp_authopt_info *info;
 	u32 rcv_nxt, snd_nxt;
 
 	// We can't use normal SNE computation before reaching TCP_ESTABLISHED
 	// For TCP_SYN_SENT the dst_isn field is initialized only after we
 	// validate the remote SYN/ACK
 	// For TCP_NEW_SYN_RECV there is no tcp_authopt_info at all
-	if (sk->sk_state == TCP_SYN_SENT || sk->sk_state == TCP_NEW_SYN_RECV || sk->sk_state == TCP_LISTEN) {
-		*sne = 0;
+	if (sk->sk_state == TCP_SYN_SENT || sk->sk_state == TCP_NEW_SYN_RECV || sk->sk_state == TCP_LISTEN)
 		return 0;
-	}
 
 	if (sk->sk_state == TCP_TIME_WAIT) {
 		rcv_nxt = tcp_twsk(sk)->tw_rcv_nxt;
 		snd_nxt = tcp_twsk(sk)->tw_snd_nxt;
-		info = tcp_twsk(sk)->tw_authopt_info;
 	} else {
+		if (WARN_ONCE(!sk_fullsock(sk), "unexpected minisock sk=%p sk_state=%d", sk, sk->sk_state))
+			return -EINVAL;
 		rcv_nxt = tcp_sk(sk)->rcv_nxt;
 		snd_nxt = tcp_sk(sk)->snd_nxt;
-		info = rcu_dereference(tcp_sk(sk)->authopt_info);
 	}
 
-	if (!info) {
-		/* This can happen if socket is closed while stack is sending packets.
-		 * Maybe the correct fix would be to only rcu_dereference once
-		 * for each packet being sent?
-		 */
+	if (WARN_ONCE(!info, "unexpected missing info for sk=%p sk_state=%d", sk, sk->sk_state))
 		return -EINVAL;
-	}
 
 	if (input)
 		*sne = htonl(compute_sne(info->rcv_sne, rcv_nxt, seq));
