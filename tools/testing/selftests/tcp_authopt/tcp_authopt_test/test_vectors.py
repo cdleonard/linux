@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0
 import logging
+import socket
 from ipaddress import IPv4Address, IPv6Address
+
 from scapy.layers.inet import IP, TCP
 from scapy.layers.inet6 import IPv6
-from .scapy_tcp_authopt import get_alg, build_context_from_packet, build_message_from_packet
+
+from .scapy_tcp_authopt import (
+    build_context_from_packet,
+    build_message_from_packet,
+    get_alg,
+)
 from .scapy_utils import scapy_tcp_get_authopt_val
-import socket
 
 logger = logging.getLogger(__name__)
 
