@@ -1,22 +1,28 @@
 # SPDX-License-Identifier: GPL-2.0
 """Test TCP-AO keys can be bound to specific remote addresses"""
-from contextlib import ExitStack
 import socket
+from contextlib import ExitStack
+
 import pytest
-from .netns_fixture import NamespaceFixture
-from .utils import create_listen_socket
-from .server import SimpleServerThread
+
+from .conftest import skipif_missing_tcp_authopt
 from .linux_tcp_authopt import (
-    tcp_authopt,
+    TCP_AUTHOPT_ALG,
     TCP_AUTHOPT_FLAG,
     TCP_AUTHOPT_KEY_FLAG,
-    TCP_AUTHOPT_ALG,
     set_tcp_authopt,
     set_tcp_authopt_key,
+    tcp_authopt,
     tcp_authopt_key,
 )
-from .utils import netns_context, DEFAULT_TCP_SERVER_PORT, check_socket_echo
-from .conftest import skipif_missing_tcp_authopt
+from .netns_fixture import NamespaceFixture
+from .server import SimpleServerThread
+from .utils import (
+    DEFAULT_TCP_SERVER_PORT,
+    check_socket_echo,
+    create_listen_socket,
+    netns_context,
+)
 
 pytestmark = skipif_missing_tcp_authopt
 
@@ -84,12 +90,16 @@ def test_addr_client_bind(exit_stack: ExitStack, address_family):
     # create servers:
     listen_socket1 = exit_stack.enter_context(
         create_listen_socket(
-            family=address_family, ns=nsfixture.server_netns_name, bind_addr=server_addr1
+            family=address_family,
+            ns=nsfixture.server_netns_name,
+            bind_addr=server_addr1,
         )
     )
     listen_socket2 = exit_stack.enter_context(
         create_listen_socket(
-            family=address_family, ns=nsfixture.server_netns_name, bind_addr=server_addr2
+            family=address_family,
+            ns=nsfixture.server_netns_name,
+            bind_addr=server_addr2,
         )
     )
     exit_stack.enter_context(SimpleServerThread(listen_socket1, mode="echo"))
