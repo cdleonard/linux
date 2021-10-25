@@ -7,21 +7,21 @@ from ipaddress import IPv4Address, IPv6Address
 
 import pytest
 
+from .conftest import skipif_missing_tcp_authopt
 from .linux_tcp_authopt import (
     TCP_AUTHOPT,
-    TCP_AUTHOPT_KEY,
     TCP_AUTHOPT_ALG,
     TCP_AUTHOPT_FLAG,
+    TCP_AUTHOPT_KEY,
     TCP_AUTHOPT_KEY_FLAG,
-    set_tcp_authopt,
-    get_tcp_authopt,
-    set_tcp_authopt_key,
     del_tcp_authopt_key,
+    get_tcp_authopt,
+    set_tcp_authopt,
+    set_tcp_authopt_key,
     tcp_authopt,
     tcp_authopt_key,
 )
 from .sockaddr import sockaddr_in, sockaddr_in6, sockaddr_unpack
-from .conftest import skipif_missing_tcp_authopt
 
 pytestmark = skipif_missing_tcp_authopt
 
@@ -136,7 +136,7 @@ def test_authopt_key_badflags():
     """Don't pretend to handle unknown flags"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         with pytest.raises(OSError):
-            set_tcp_authopt_key(sock, tcp_authopt_key(flags=0xabcdef))
+            set_tcp_authopt_key(sock, tcp_authopt_key(flags=0xABCDEF))
 
 
 def test_authopt_key_longer_bad():
@@ -183,3 +183,21 @@ def test_authopt_longer_zeros():
         optbuf = bytes(opt)
         optbuf = optbuf.ljust(len(optbuf) + 256, b"\x00")
         sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT, optbuf)
+
+
+def test_authopt_setdel_addrbind():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        key = tcp_authopt_key(addr="1.1.1.1", recv_id=1, send_id=1)
+        key2 = tcp_authopt_key(addr="1.1.1.2", recv_id=1, send_id=1)
+        set_tcp_authopt_key(sock, key)
+        assert del_tcp_authopt_key(sock, key2) == False
+        assert del_tcp_authopt_key(sock, key) == True
+        assert del_tcp_authopt_key(sock, key) == False
+
+
+def test_authopt_include_options():
+    key = tcp_authopt_key()
+    assert key.include_options
+    key.include_options = False
+    assert key.flags & TCP_AUTHOPT_KEY_FLAG.EXCLUDE_OPTS
+    assert not key.include_options
