@@ -89,6 +89,11 @@ class TcpAuthValidator:
         tcp_track_key = get_packet_tcp_connection_key(p)
         conn = self.tracker.get(tcp_track_key)
 
+        if conn is None:
+            raise ValueError(
+                "TCPConnectionTracker.handle_packet should have initialized TCPConnectionInfo"
+            )
+
         if not conn.found_syn:
             logger.warning("missing SYN for %s", p)
             self.any_incomplete = True
