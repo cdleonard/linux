@@ -87,7 +87,10 @@ def get_tcp_authopt(sock: socket.socket) -> tcp_authopt:
 
 
 class tcp_authopt_key:
-    """Like linux struct tcp_authopt_key"""
+    """Like linux struct tcp_authopt_key
+
+    :ivar auto_flags: If true(default) then set "binding" flags based on non-null values.
+    """
 
     KeyArgType = typing.Union[str, bytes]
     AddrArgType = typing.Union[None, str, bytes, SockaddrConvertType]
@@ -100,6 +103,7 @@ class tcp_authopt_key:
         alg=TCP_AUTHOPT_ALG.HMAC_SHA_1_96,
         key: KeyArgType = b"",
         addr: AddrArgType = None,
+        auto_flags: bool = True,
         include_options=None,
     ):
         self.flags = flags
@@ -108,15 +112,20 @@ class tcp_authopt_key:
         self.alg = alg
         self.key = key
         self.addr = addr
+        self.auto_flags = auto_flags
         if include_options is not None:
             self.include_options = include_options
+
+    def get_real_flags(self) -> TCP_AUTHOPT_KEY_FLAG:
+        result = self.flags
+        return result
 
     def pack(self):
         if len(self.key) > TCP_AUTHOPT_MAXKEYLEN:
             raise ValueError(f"Max key length is {TCP_AUTHOPT_MAXKEYLEN}")
         data = struct.pack(
             "IBBBB80s",
-            self.flags,
+            self.get_real_flags(),
             self.send_id,
             self.recv_id,
             self.alg,
