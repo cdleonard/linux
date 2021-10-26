@@ -118,6 +118,11 @@ class tcp_authopt_key:
 
     def get_real_flags(self) -> TCP_AUTHOPT_KEY_FLAG:
         result = self.flags
+        if self.auto_flags:
+            if self.addr is not None:
+                result |= TCP_AUTHOPT_KEY_FLAG.BIND_ADDR
+            else:
+                result &= ~TCP_AUTHOPT_KEY_FLAG.BIND_ADDR
         return result
 
     def pack(self):
