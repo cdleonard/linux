@@ -1,15 +1,21 @@
 # SPDX-License-Identifier: GPL-2.0
 """Python wrapper around linux TCP_AUTHOPT ABI"""
 
-from dataclasses import dataclass
-from ipaddress import IPv4Address, IPv6Address, ip_address
-import socket
-from enum import IntEnum, IntFlag
 import errno
 import logging
-from .sockaddr import sockaddr_in, sockaddr_in6, sockaddr_storage, sockaddr_unpack
-import typing
+import socket
 import struct
+import typing
+from dataclasses import dataclass
+from enum import IntEnum, IntFlag
+
+from .sockaddr import (
+    SockaddrConvertType,
+    sockaddr_base,
+    sockaddr_convert,
+    sockaddr_storage,
+    sockaddr_unpack,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +89,17 @@ def get_tcp_authopt(sock: socket.socket) -> tcp_authopt:
 class tcp_authopt_key:
     """Like linux struct tcp_authopt_key"""
 
+    KeyArgType = typing.Union[str, bytes]
+    AddrArgType = typing.Union[None, str, bytes, SockaddrConvertType]
+
     def __init__(
         self,
-        flags: int = 0,
+        flags: TCP_AUTHOPT_KEY_FLAG = TCP_AUTHOPT_KEY_FLAG(0),
         send_id: int = 0,
         recv_id: int = 0,
         alg=TCP_AUTHOPT_ALG.HMAC_SHA_1_96,
-        key: bytes = b"",
-        addr: bytes = b"",
+        key: KeyArgType = b"",
+        addr: AddrArgType = None,
         include_options=None,
     ):
         self.flags = flags
@@ -121,11 +130,11 @@ class tcp_authopt_key:
         return self.pack()
 
     @property
-    def key(self) -> bytes:
+    def key(self) -> KeyArgType:
         return self._key
 
     @key.setter
-    def key(self, val: typing.Union[bytes, str]) -> bytes:
+    def key(self, val: KeyArgType) -> bytes:
         if isinstance(val, str):
             val = val.encode("utf-8")
         if len(val) > TCP_AUTHOPT_MAXKEYLEN:
@@ -141,32 +150,22 @@ class tcp_authopt_key:
             return sockaddr_unpack(bytes(self.addrbuf))
 
     @addr.setter
-    def addr(self, val):
+    def addr(self, val: AddrArgType):
         if isinstance(val, bytes):
             if len(val) > sockaddr_storage.sizeof:
                 raise ValueError(f"Must be up to {sockaddr_storage.sizeof}")
             self.addrbuf = val
         elif val is None:
             self.addrbuf = b""
-        elif isinstance(val, str):
-            self.addr = ip_address(val)
-        elif isinstance(val, IPv4Address):
-            self.addr = sockaddr_in(addr=val)
-        elif isinstance(val, IPv6Address):
-            self.addr = sockaddr_in6(addr=val)
-        elif (
-            isinstance(val, sockaddr_in)
-            or isinstance(val, sockaddr_in6)
-            or isinstance(val, sockaddr_storage)
-        ):
+        elif isinstance(val, sockaddr_base):
             self.addr = bytes(val)
         else:
-            raise TypeError(f"Can't handle addr {val}")
+            self.addr = sockaddr_convert(val)
         return self.addr
 
     @property
     def include_options(self) -> bool:
-        return (self.flags & TCP_AUTHOPT_KEY.EXCLUDE_OPTS) == 0
+        return not self.flags & TCP_AUTHOPT_KEY_FLAG.EXCLUDE_OPTS
 
     @include_options.setter
     def include_options(self, value) -> bool:
@@ -174,6 +173,7 @@ class tcp_authopt_key:
             self.flags &= ~TCP_AUTHOPT_KEY_FLAG.EXCLUDE_OPTS
         else:
             self.flags |= TCP_AUTHOPT_KEY_FLAG.EXCLUDE_OPTS
+        return value
 
     @property
     def delete_flag(self) -> bool:
@@ -185,10 +185,19 @@ class tcp_authopt_key:
             self.flags |= TCP_AUTHOPT_KEY_FLAG.DEL
         else:
             self.flags &= ~TCP_AUTHOPT_KEY_FLAG.DEL
+        return value
 
 
-def set_tcp_authopt_key(sock, key: tcp_authopt_key):
-    return sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT_KEY, bytes(key))
+def set_tcp_authopt_key(sock, keyopt: tcp_authopt_key):
+    return sock.setsockopt(socket.SOL_TCP, TCP_AUTHOPT_KEY, bytes(keyopt))
+
+
+def set_tcp_authopt_key_kwargs(sock, keyopt: tcp_authopt_key = None, **kw):
+    if keyopt is None:
+        keyopt = tcp_authopt_key()
+    for k, v in kw.items():
+        setattr(keyopt, k, v)
+    return set_tcp_authopt_key(sock, keyopt)
 
 
 def del_tcp_authopt_key(sock, key: tcp_authopt_key) -> bool:
@@ -209,18 +218,23 @@ def del_tcp_authopt_key(sock, key: tcp_authopt_key) -> bool:
         raise
 
 
-def get_sysctl_tcp_authopt() -> bool:
+def get_sysctl_tcp_authopt() -> typing.Optional[bool]:
     from pathlib import Path
 
     path = Path("/proc/sys/net/ipv4/tcp_authopt")
     if path.exists():
         return path.read_text().strip() != "0"
+    else:
+        return None
 
 
-def enable_sysctl_tcp_authopt() -> bool:
+def enable_sysctl_tcp_authopt():
     from pathlib import Path
 
     path = Path("/proc/sys/net/ipv4/tcp_authopt")
+    # Do nothing if absent
+    if not path.exists():
+        return
     try:
         if path.read_text().strip() == "0":
             path.write_text("1")
