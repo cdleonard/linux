@@ -1520,11 +1520,13 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 				if (skb->protocol == htons(ETH_P_IP)) {
 					l3index = inet_sdif(skb) ? inet_iif(skb) : 0;
 				} else if (skb->protocol == htons(ETH_P_IPV6)) {
-					l3index = inet6_sdif(skb) ? inet_iif(skb) : 0;
+					l3index = inet6_sdif(skb) ? inet6_iif(skb) : 0;
 				} else {
 					WARN_ONCE(1, "unexpected skb->protocol=%x", skb->protocol);
 					continue;
 				}
+				if (WARN_ONCE(l3index < 0, "failed to determine l3index: %d", l3index))
+					continue;
 			}
 
 			if (l3index != key->l3index)
