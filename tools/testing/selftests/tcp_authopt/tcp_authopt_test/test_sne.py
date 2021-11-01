@@ -10,6 +10,7 @@ import pytest
 
 from .linux_tcp_authopt import set_tcp_authopt_key_kwargs
 from .linux_tcp_repair import get_tcp_repair_recv_send_queue_seq, tcp_repair_toggle
+from .linux_tcp_repair_authopt import get_tcp_repair_authopt
 from .netns_fixture import NamespaceFixture
 from .scapy_conntrack import TCPConnectionKey, TCPConnectionTracker
 from .scapy_utils import AsyncSnifferContext, create_capture_socket, tcp_seq_wrap
@@ -72,6 +73,7 @@ def test_high_seq_rollover(exit_stack: ExitStack, signed: bool):
     secret_key = b"12345"
     mode = "echo"
     validator_enabled = True
+    tcp_repair_authopt_enabled = True
 
     nsfixture = exit_stack.enter_context(NamespaceFixture())
     server_addr = nsfixture.get_addr(socket.AF_INET, 1)
@@ -132,6 +134,16 @@ def test_high_seq_rollover(exit_stack: ExitStack, signed: bool):
     assert client_socket is not None
 
     logger.debug("setup recv_seq %08x send_seq %08x", recv_seq, send_seq)
+
+    # Init tcp_repair_authopt
+    if signed and tcp_repair_authopt_enabled:
+        with tcp_repair_toggle(client_socket):
+            init_tcp_repair_authopt = get_tcp_repair_authopt(client_socket)
+        assert init_tcp_repair_authopt.src_isn + 1 == send_seq
+        assert init_tcp_repair_authopt.dst_isn + 1 == recv_seq
+        assert init_tcp_repair_authopt.snd_sne == 0
+        assert init_tcp_repair_authopt.rcv_sne == 0
+        logger.debug("tcp repair authopt: %r", init_tcp_repair_authopt)
 
     # Init validator
     if signed and validator_enabled:
@@ -198,5 +210,16 @@ def test_high_seq_rollover(exit_stack: ExitStack, signed: bool):
         snd_sne_rollover = client_scappy_conn.snd_sne.sne != 0
         rcv_sne_rollover = client_scappy_conn.rcv_sne.sne != 0
         assert snd_sne_rollover or rcv_sne_rollover
+
+    # Validate SNE as read via TCP_REPAIR_AUTHOPT
+    if signed and tcp_repair_authopt_enabled:
+        with tcp_repair_toggle(client_socket):
+            exit_tcp_repair_authopt = get_tcp_repair_authopt(client_socket)
+        logger.debug("exit tcp repair authopt: %r", exit_tcp_repair_authopt)
+        assert exit_tcp_repair_authopt.src_isn == init_tcp_repair_authopt.src_isn
+        assert exit_tcp_repair_authopt.dst_isn == init_tcp_repair_authopt.dst_isn
+        assert (
+            exit_tcp_repair_authopt.snd_sne != 0 or exit_tcp_repair_authopt.rcv_sne != 0
+        )
 
     assert not fail_transfer
