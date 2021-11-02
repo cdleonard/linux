@@ -2308,7 +2308,11 @@ DECLARE_STATIC_KEY_FALSE(tcp_tx_delay_enabled);
 static inline void tcp_add_tx_delay(struct sk_buff *skb,
 				    const struct tcp_sock *tp)
 {
+#ifdef CONFIG_TCP_AUTHOPT
+	if (static_key_enabled(&tcp_tx_delay_enabled))
+#else
 	if (static_branch_unlikely(&tcp_tx_delay_enabled))
+#endif
 		skb->skb_mstamp_ns += (u64)tp->tcp_tx_delay * NSEC_PER_USEC;
 }
 
