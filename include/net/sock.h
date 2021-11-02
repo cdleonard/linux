@@ -982,7 +982,11 @@ static inline void sock_rps_record_flow_hash(__u32 hash)
 static inline void sock_rps_record_flow(const struct sock *sk)
 {
 #ifdef CONFIG_RPS
+#ifdef CONFIG_TCP_AUTHOPT
+	if (static_key_enabled(&rfs_needed)) {
+#else
 	if (static_branch_unlikely(&rfs_needed)) {
+#endif
 		/* Reading sk->sk_rxhash might incur an expensive cache line
 		 * miss.
 		 *
