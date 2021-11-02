@@ -199,11 +199,10 @@ static inline void tcp_authopt_update_rcv_sne(struct tcp_sock *tp, u32 seq)
 	struct tcp_authopt_info *info;
 
 	if (static_branch_unlikely(&tcp_authopt_needed)) {
-		rcu_read_lock();
-		info = rcu_dereference(tp->authopt_info);
+		info = rcu_dereference_protected(tp->authopt_info,
+						 lockdep_sock_is_held((struct sock *)tp));
 		if (info)
 			__tcp_authopt_update_rcv_sne(tp, info, seq);
-		rcu_read_unlock();
 	}
 }
 void __tcp_authopt_update_snd_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq);
@@ -212,11 +211,10 @@ static inline void tcp_authopt_update_snd_sne(struct tcp_sock *tp, u32 seq)
 	struct tcp_authopt_info *info;
 
 	if (static_branch_unlikely(&tcp_authopt_needed)) {
-		rcu_read_lock();
-		info = rcu_dereference(tp->authopt_info);
+		info = rcu_dereference_protected(tp->authopt_info,
+						 lockdep_sock_is_held((struct sock *)tp));
 		if (info)
 			__tcp_authopt_update_snd_sne(tp, info, seq);
-		rcu_read_unlock();
 	}
 }
 #else
