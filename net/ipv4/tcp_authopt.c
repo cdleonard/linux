@@ -1696,3 +1696,48 @@ accept:
 
 	return 1;
 }
+
+#if 1
+#include "kpatch-macros.h"
+
+static int tcp_authopt_pre_patch(patch_object *obj)
+{
+	pr_info("%s: pre patch\n", __func__);
+	return 0;
+}
+
+static void tcp_authopt_post_patch(patch_object *obj)
+{
+	pr_info("%s: post patch\n", __func__);
+}
+
+static void tcp_authopt_unpatch_shadow_destructor(void *obj, void *_shadow)
+{
+	struct sock *sk = obj;
+	struct tcp_authopt_sock_shadow *shadow = _shadow;
+
+	/* We could clear the info but out only goal is to avoid crashes.
+	 * It would also require ensuring normal paths free shadow before info.
+	 */
+	pr_info("%s: leak active sk=%p state=%d shadow=%p info=%p\n",
+			__func__, sk, sk->sk_state, shadow, shadow->info);
+}
+
+static void tcp_authopt_pre_unpatch(patch_object *obj)
+{
+	pr_info("%s: lkp_shadow_free_all\n", __func__);
+	klp_shadow_free_all(TCP_AUTHOPT_SOCK_SHADOW, tcp_authopt_unpatch_shadow_destructor);
+	pr_info("%s: lkp_shadow_free_all complete\n", __func__);
+}
+
+static void tcp_authopt_post_unpatch(patch_object *obj)
+{
+	pr_info("%s: post unpatch\n", __func__);
+}
+
+KPATCH_PRE_PATCH_CALLBACK(tcp_authopt_pre_patch);
+KPATCH_POST_PATCH_CALLBACK(tcp_authopt_post_patch);
+KPATCH_PRE_UNPATCH_CALLBACK(tcp_authopt_pre_unpatch);
+KPATCH_POST_UNPATCH_CALLBACK(tcp_authopt_post_unpatch);
+
+#endif
