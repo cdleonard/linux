@@ -24,6 +24,8 @@
 #include <net/netlink.h>
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
+#include <linux/tcp.h>
+#include <net/tcp_authopt.h>
 
 /*
  *	Our network namespace constructor/destructor lists
@@ -336,6 +338,10 @@ static __net_init int setup_net(struct net *net, struct user_namespace *user_ns)
 		if (error < 0)
 			goto out_undo;
 	}
+	error = tcp_authopt_init_net(net);
+	if (error < 0)
+		goto out_undo;
+
 	down_write(&net_rwsem);
 	list_add_tail_rcu(&net->list, &net_namespace_list);
 	up_write(&net_rwsem);
@@ -343,6 +349,8 @@ out:
 	return error;
 
 out_undo:
+	tcp_authopt_exit_net(net);
+
 	/* Walk through the list backwards calling the exit functions
 	 * for the pernet modules whose init functions did not fail.
 	 */
@@ -613,6 +621,7 @@ static void cleanup_net(struct work_struct *work)
 		dec_net_namespaces(net->ucounts);
 		key_remove_domain(net->key_domain);
 		put_user_ns(net->user_ns);
+		tcp_authopt_exit_net(net);
 		net_drop_ns(net);
 	}
 }

@@ -41,6 +41,7 @@
 #include <linux/export.h>
 #include <net/sock.h>
 #include <net/raw.h>
+#include <net/tcp_authopt.h>
 
 #define TCPUDP_MIB_MAX max_t(u32, UDP_MIB_MAX, TCP_MIB_MAX)
 
@@ -464,12 +465,17 @@ static int netstat_seq_show(struct seq_file *seq, void *v)
 	seq_puts(seq, "TcpExt:");
 	for (i = 0; snmp4_net_list[i].name; i++)
 		seq_printf(seq, " %s", snmp4_net_list[i].name);
+	seq_printf(seq, " TCPAuthOptFailure");
 
 	seq_puts(seq, "\nTcpExt:");
 	for (i = 0; snmp4_net_list[i].name; i++)
 		seq_printf(seq, " %lu",
 			   snmp_fold_field(net->mib.net_statistics,
 					   snmp4_net_list[i].entry));
+	{
+		struct tcp_authopt_net_shadow *sh = get_tcp_authopt_net_shadow(net);
+		seq_printf(seq, " %lu", atomic64_read(&sh->fail_count));
+	}
 
 	seq_puts(seq, "\nIpExt:");
 	for (i = 0; snmp4_ipextstats_list[i].name; i++)

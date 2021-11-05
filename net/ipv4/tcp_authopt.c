@@ -1625,6 +1625,17 @@ static void print_tcpao_notice(const char *msg, struct sk_buff *skb)
 	}
 }
 
+static inline void inc_shadow_fail_count(struct sock *sk)
+{
+	struct tcp_authopt_net_shadow *sh;
+
+	sh = get_tcp_authopt_net_shadow(sock_net(sk));
+	if (WARN_ONCE(!sh, "missing net shadow"))
+		return;
+
+	atomic64_inc(&sh->fail_count);
+}
+
 int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp_authopt_info *info, const u8* _opt)
 {
 	struct tcphdr_authopt *opt = (struct tcphdr_authopt*)_opt;
@@ -1639,8 +1650,8 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	if (!opt && !key)
 		return 0;
 	if (!opt && key) {
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		print_tcpao_notice("TCP Authentication Missing", skb);
+		inc_shadow_fail_count(sk);
 		return -EINVAL;
 	}
 	if (opt && !anykey) {
@@ -1651,8 +1662,8 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		 * connections.
 		 */
 		if (info->flags & TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED) {
-			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 			print_tcpao_notice("TCP Authentication Unexpected: Rejected", skb);
+			inc_shadow_fail_count(sk);
 			return -EINVAL;
 		}
 		print_tcpao_notice("TCP Authentication Unexpected: Accepted", skb);
@@ -1660,8 +1671,8 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 	}
 	if (opt && !key) {
 		/* Keys are configured for peer but with different keyid than packet */
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		print_tcpao_notice("TCP Authentication Failed", skb);
+		inc_shadow_fail_count(sk);
 		return -EINVAL;
 	}
 
@@ -1674,8 +1685,8 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, struct tcp
 		return err;
 
 	if (memcmp(macbuf, opt->mac, TCP_AUTHOPT_MACLEN)) {
-		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTHOPTFAILURE);
 		print_tcpao_notice("TCP Authentication Failed", skb);
+		inc_shadow_fail_count(sk);
 		return -EINVAL;
 	}
 
@@ -1697,12 +1708,48 @@ accept:
 	return 1;
 }
 
+int tcp_authopt_init_net(struct net *net)
+{
+	struct tcp_authopt_sock_shadow *sh;
+
+	sh = klp_shadow_alloc(net, TCP_AUTHOPT_NET_SHADOW, sizeof(*sh),
+			      GFP_KERNEL | __GFP_ZERO,
+			      NULL, NULL);
+
+	return sh ? 0 : -ENOMEM;
+}
+
+void tcp_authopt_exit_net(struct net *net)
+{
+	klp_shadow_free(net, TCP_AUTHOPT_NET_SHADOW, NULL);
+}
+
+static void tcp_authopt_init_net_all(void)
+{
+	struct net *net;
+
+	rtnl_lock();
+	down_write(&net_rwsem);
+	for_each_net(net)
+		tcp_authopt_init_net(net);
+	up_write(&net_rwsem);
+	rtnl_unlock();
+}
+
+static void tcp_authopt_exit_net_all(void)
+{
+	klp_shadow_free_all(TCP_AUTHOPT_NET_SHADOW, NULL);
+}
+
+// FIXME: determine if actually building kpatch?
 #if 1
 #include "kpatch-macros.h"
 
 static int tcp_authopt_pre_patch(patch_object *obj)
 {
 	pr_info("%s: pre patch\n", __func__);
+	tcp_authopt_init_net_all();
+	pr_info("%s: pre patch done\n", __func__);
 	return 0;
 }
 
@@ -1725,9 +1772,10 @@ static void tcp_authopt_unpatch_shadow_destructor(void *obj, void *_shadow)
 
 static void tcp_authopt_pre_unpatch(patch_object *obj)
 {
-	pr_info("%s: lkp_shadow_free_all\n", __func__);
+	pr_info("%s: pre unpatch\n", __func__);
 	klp_shadow_free_all(TCP_AUTHOPT_SOCK_SHADOW, tcp_authopt_unpatch_shadow_destructor);
-	pr_info("%s: lkp_shadow_free_all complete\n", __func__);
+	tcp_authopt_exit_net_all();
+	pr_info("%s: pre unpatch done\n", __func__);
 }
 
 static void tcp_authopt_post_unpatch(patch_object *obj)
