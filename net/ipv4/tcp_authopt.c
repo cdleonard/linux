@@ -760,6 +760,8 @@ static int tcp_authopt_clone_keys(struct sock *newsk,
 	return 0;
 }
 
+static u32 compute_sne(u32 sne, u32 prev_seq, u32 seq);
+
 /** Called to create accepted sockets.
  *
  *  Need to copy authopt info from listen socket.
@@ -783,6 +785,9 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 
 	new_info->src_isn = tcp_rsk(req)->snt_isn;
 	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
+	/* Caller is tcp_create_openreq_child and already initializes snd_nxt/rcv_nxt */
+	new_info->snd_sne = compute_sne(0, new_info->src_isn, tcp_sk(newsk)->snd_nxt);
+	new_info->rcv_sne = compute_sne(0, new_info->dst_isn, tcp_sk(newsk)->rcv_nxt);
 	INIT_HLIST_HEAD(&new_info->head);
 	err = tcp_authopt_clone_keys(newsk, oldsk, new_info, old_info);
 	if (err) {
