@@ -2049,6 +2049,28 @@ static int tcp_v4_auth_inbound_check(struct sock *sk,
 	return tcp_v4_inbound_md5_hash(sk, skb, dif, sdif);
 }
 
+static int tcp_v4_auth_inbound_check_req(struct request_sock *req,
+					 struct sk_buff *skb,
+					 int dif,
+					 int sdif)
+{
+	struct sock *lsk = req->rsk_listener;
+	int aoret = 0;
+
+	if (static_branch_unlikely(&tcp_authopt_needed)) {
+		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(lsk)->authopt_info);
+
+		if (info)
+			aoret = __tcp_authopt_inbound_check((struct sock *)req, skb, info);
+	}
+	if (aoret < 0)
+		return aoret;
+	if (aoret > 0)
+		return 0;
+
+	return tcp_v4_inbound_md5_hash(lsk, skb, dif, sdif);
+}
+
 /*
  *	From tcp_input.c
  */
@@ -2106,7 +2128,7 @@ process:
 		struct sock *nsk;
 
 		sk = req->rsk_listener;
-		if (unlikely(tcp_v4_auth_inbound_check(sk, skb, dif, sdif))) {
+		if (unlikely(tcp_v4_auth_inbound_check_req(req, skb, dif, sdif))) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
 			goto discard_it;
