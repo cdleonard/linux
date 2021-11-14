@@ -1078,13 +1078,26 @@ static int compute_packet_sne(struct sock *sk, struct tcp_authopt_info *info,
 {
 	u32 rcv_nxt, snd_nxt;
 
-	// We can't use normal SNE computation before reaching TCP_ESTABLISHED
-	// For TCP_SYN_SENT the dst_isn field is initialized only after we
-	// validate the remote SYN/ACK
-	// For TCP_NEW_SYN_RECV there is no tcp_authopt_info at all
-	if (sk->sk_state == TCP_SYN_SENT ||
-	    sk->sk_state == TCP_NEW_SYN_RECV ||
-	    sk->sk_state == TCP_LISTEN)
+	// For TCP_NEW_SYN_RECV we have no tcp_authopt_info but tcp_request_sock holds ISN.
+	if (sk->sk_state == TCP_NEW_SYN_RECV) {
+		struct tcp_request_sock *rsk = tcp_rsk((struct request_sock *)sk);
+
+		if (input)
+			*sne = htonl(compute_sne(0, rsk->rcv_isn, seq));
+		else
+			*sne = htonl(compute_sne(0, rsk->snt_isn, seq));
+		return 0;
+	}
+
+	/* TCP_LISTEN only receives SYN */
+	if (sk->sk_state == TCP_LISTEN && input)
+		return 0;
+
+	/* TCP_SYN_SENT only sends SYN and receives SYN/ACK
+	 * For the input case rcv_nxt is initialized after the packet is
+	 * validated so tcp_sk(sk)->rcv_nxt is not initialized.
+	 */
+	if (sk->sk_state == TCP_SYN_SENT)
 		return 0;
 
 	if (sk->sk_state == TCP_TIME_WAIT) {
