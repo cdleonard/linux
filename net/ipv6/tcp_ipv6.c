@@ -914,7 +914,7 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 		tot_len += TCPOLEN_TSTAMP_ALIGNED;
 #ifdef CONFIG_TCP_AUTHOPT
 	/* Key lookup before SKB allocation */
-	if (static_branch_unlikely(&tcp_authopt_needed) && sk) {
+	if (tcp_authopt_needed && sk) {
 		if (sk->sk_state == TCP_TIME_WAIT)
 			authopt_info = tcp_twsk(sk)->tw_authopt_info;
 		else
@@ -989,7 +989,7 @@ static void tcp_v6_send_response(const struct sock *sk, struct sk_buff *skb, u32
 #endif
 #ifdef CONFIG_TCP_AUTHOPT
 	/* Compute the TCP-AO mac. Unlike in the ipv4 case we have a real SKB */
-	if (static_branch_unlikely(&tcp_authopt_needed) && authopt_key_info) {
+	if (tcp_authopt_needed && authopt_key_info) {
 		*topt++ = htonl((TCPOPT_AUTHOPT << 24) |
 				(TCPOLEN_AUTHOPT_OUTPUT << 16) |
 				(authopt_key_info->send_id << 8) |
@@ -1676,6 +1676,28 @@ static int tcp_v6_auth_inbound_check(struct sock *sk,
 	return tcp_v6_inbound_md5_hash(sk, skb, dif, sdif);
 }
 
+static int tcp_v6_auth_inbound_check_req(struct request_sock *req,
+                                        struct sk_buff *skb,
+                                        int dif,
+                                        int sdif)
+{
+       struct sock *lsk = req->rsk_listener;
+       int aoret = 0;
+
+       if (tcp_authopt_needed) {
+               struct tcp_authopt_info *info = rcu_dereference(tcp_sk(lsk)->authopt_info);
+
+               if (info)
+                       aoret = __tcp_authopt_inbound_check((struct sock *)req, skb, info);
+       }
+       if (aoret < 0)
+               return aoret;
+       if (aoret > 0)
+               return 0;
+
+       return tcp_v6_inbound_md5_hash(lsk, skb, dif, sdif);
+}
+
 INDIRECT_CALLABLE_SCOPE int tcp_v6_rcv(struct sk_buff *skb)
 {
 	int sdif = inet6_sdif(skb);
@@ -1728,7 +1750,7 @@ process:
 		struct sock *nsk;
 
 		sk = req->rsk_listener;
-		if (tcp_v6_auth_inbound_check(sk, skb, dif, sdif)) {
+		if (tcp_v6_auth_inbound_check_req(req, skb, dif, sdif)) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
 			goto discard_it;
