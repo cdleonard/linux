@@ -676,15 +676,15 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 }
 
 static int tcp_authopt_get_isn(struct sock *sk,
+			       struct tcp_authopt_info *info,
 			       struct sk_buff *skb,
 			       int input,
 			       __be32 *sisn,
 			       __be32 *disn)
 {
-	struct tcp_authopt_info *authopt_info;
 	struct tcphdr *th = tcp_hdr(skb);
 
-	/* special cases for SYN and SYN/ACK */
+	/* Special cases for SYN and SYN/ACK */
 	if (th->syn && !th->ack) {
 		*sisn = th->seq;
 		*disn = 0;
@@ -696,18 +696,14 @@ static int tcp_authopt_get_isn(struct sock *sk,
 		return 0;
 	}
 
-	/* Fetching authopt_info like this should be safe because authopt_info
-	 * is never released intil the socket is being closed
-	 *
-	 * tcp_timewait_sock is handled but not tcp_request_sock.
-	 * for the synack case sk should be the listen socket.
-	 */
-	rcu_read_lock();
-	if (unlikely(sk->sk_state == TCP_NEW_SYN_RECV)) {
-		/* should never happen, sk should be the listen socket */
-		authopt_info = NULL;
-		WARN_ONCE(1, "TCP-AO can't sign with request sock\n");
-		return -EINVAL;
+	if (sk->sk_state == TCP_NEW_SYN_RECV) {
+		struct tcp_request_sock *rsk = (struct tcp_request_sock *)sk;
+
+		if (WARN_ONCE(!input, "Caller passed wrong socket"))
+			return -EINVAL;
+		*sisn = htonl(rsk->rcv_isn);
+		*disn = htonl(rsk->snt_isn);
+		return 0;
 	} else if (sk->sk_state == TCP_LISTEN) {
 		/* Signature computation for non-syn packet on a listen
 		 * socket is not possible because we lack the initial
@@ -725,38 +721,22 @@ static int tcp_authopt_get_isn(struct sock *sk,
 		 * Reporting an error from signature code causes the
 		 * packet to be discarded which is good.
 		 */
-		if (input) {
-			/* Assume this is an ACK to a SYN/ACK
-			 * This will incorrectly report "failed
-			 * signature" for segments without a connection.
-			 */
-			*sisn = htonl(ntohl(th->seq) - 1);
-			*disn = htonl(ntohl(th->ack_seq) - 1);
-			rcu_read_unlock();
-			return 0;
-		}
-		/* This would be an internal bug. */
-		authopt_info = NULL;
-		WARN_ONCE(1, "TCP-AO can't sign non-syn from TCP_LISTEN sock\n");
-		return -EINVAL;
-	} else if (sk->sk_state == TCP_TIME_WAIT) {
-		authopt_info = tcp_twsk(sk)->tw_authopt_info;
-	} else {
-		authopt_info = rcu_dereference(tcp_sk(sk)->authopt_info);
+		if (WARN_ONCE(!input, "Caller passed wrong socket"))
+			return -EINVAL;
+		*sisn = 0;
+		*disn = 0;
+		return 0;
 	}
-	if (!authopt_info) {
-		rcu_read_unlock();
+	if (WARN_ONCE(!info, "caller did not pass tcp_authopt_info\n"))
 		return -EINVAL;
-	}
 	/* Initial sequence numbers for ESTABLISHED connections from info */
 	if (input) {
-		*sisn = htonl(authopt_info->dst_isn);
-		*disn = htonl(authopt_info->src_isn);
+		*sisn = htonl(info->dst_isn);
+		*disn = htonl(info->src_isn);
 	} else {
-		*sisn = htonl(authopt_info->src_isn);
-		*disn = htonl(authopt_info->dst_isn);
+		*sisn = htonl(info->src_isn);
+		*disn = htonl(info->dst_isn);
 	}
-	rcu_read_unlock();
 
 	return 0;
 }
@@ -819,6 +799,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 					 struct sock *sk,
 					 struct sk_buff *skb,
+					 struct tcp_authopt_info *info,
 					 bool input,
 					 bool ipv6)
 {
@@ -864,7 +845,7 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	err = crypto_shash_update(desc, (u8 *)&th->source, 4);
 	if (err)
 		return err;
-	err = tcp_authopt_get_isn(sk, skb, input, &sisn, &disn);
+	err = tcp_authopt_get_isn(sk, info, skb, input, &sisn, &disn);
 	if (err)
 		return err;
 	err = crypto_shash_update(desc, (u8 *)&sisn, 4);
@@ -911,6 +892,7 @@ static int tcp_authopt_setkey(struct crypto_shash *tfm, struct tcp_authopt_key_i
 static int tcp_authopt_get_traffic_key(struct sock *sk,
 				       struct sk_buff *skb,
 				       struct tcp_authopt_key_info *key,
+				       struct tcp_authopt_info *info,
 				       bool input,
 				       bool ipv6,
 				       u8 *traffic_key)
@@ -932,7 +914,7 @@ static int tcp_authopt_get_traffic_key(struct sock *sk,
 	if (err)
 		goto out;
 
-	err = tcp_authopt_shash_traffic_key(desc, sk, skb, input, ipv6);
+	err = tcp_authopt_shash_traffic_key(desc, sk, skb, info, input, ipv6);
 	if (err)
 		goto out;
 
@@ -1358,7 +1340,7 @@ static int __tcp_authopt_calc_mac(struct sock *sk,
 	if (sk->sk_family != AF_INET && sk->sk_family != AF_INET6)
 		return -EINVAL;
 
-	err = tcp_authopt_get_traffic_key(sk, skb, key, input, ipv6, traffic_key);
+	err = tcp_authopt_get_traffic_key(sk, skb, key, info, input, ipv6, traffic_key);
 	if (err)
 		return err;
 
