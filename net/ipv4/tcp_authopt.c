@@ -699,13 +699,10 @@ static int tcp_authopt_get_isn(struct sock *sk,
 	if (sk->sk_state == TCP_NEW_SYN_RECV) {
 		struct tcp_request_sock *rsk = (struct tcp_request_sock *)sk;
 
-		if (input) {
-			*sisn = htonl(rsk->rcv_isn);
-			*disn = htonl(rsk->snt_isn);
-		} else {
-			*sisn = htonl(rsk->snt_isn);
-			*disn = htonl(rsk->rcv_isn);
-		}
+		if (WARN_ONCE(!input, "Caller passed wrong socket"))
+			return -EINVAL;
+		*sisn = htonl(rsk->rcv_isn);
+		*disn = htonl(rsk->snt_isn);
 		return 0;
 	} else if (sk->sk_state == TCP_LISTEN) {
 		/* Signature computation for non-syn packet on a listen
