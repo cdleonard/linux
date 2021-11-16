@@ -1223,8 +1223,11 @@ static int compute_packet_sne(struct sock *sk, struct tcp_authopt_info *info,
 	if (sk->sk_state == TCP_LISTEN && input)
 		return 0;
 
-	/* TCP_SYN_SENT only sends SYN */
-	if (sk->sk_state == TCP_SYN_SENT && !input)
+	/* TCP_SYN_SENT only sends SYN and receives SYN/ACK
+	 * For the input case rcv_nxt is initialized after the packet is
+	 * validated so tcp_sk(sk)->rcv_nxt is not initialized.
+	 */
+	if (sk->sk_state == TCP_SYN_SENT)
 		return 0;
 
 	if (sk->sk_state == TCP_TIME_WAIT) {
