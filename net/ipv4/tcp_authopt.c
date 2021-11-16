@@ -721,8 +721,11 @@ static int tcp_authopt_get_isn(struct sock *sk,
 		 * Reporting an error from signature code causes the
 		 * packet to be discarded which is good.
 		 */
-		WARN_ONCE(1, "TCP-AO can't handle non-SYN from TCP_LISTEN sock\n");
-		return -EINVAL;
+		if (WARN_ONCE(!input, "Caller passed wrong socket"))
+			return -EINVAL;
+		*sisn = 0;
+		*disn = 0;
+		return 0;
 	}
 	if (WARN_ONCE(!info, "caller did not pass tcp_authopt_info\n"))
 		return -EINVAL;
