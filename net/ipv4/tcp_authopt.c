@@ -399,7 +399,7 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 
 	/* Never released: */
 	static_branch_inc(&tcp_authopt_needed);
-	sk_nocaps_add(sk, NETIF_F_GSO_MASK);
+	sk_gso_disable(sk);
 	INIT_HLIST_HEAD(&info->head);
 	rcu_assign_pointer(tp->authopt_info, info);
 
@@ -794,7 +794,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 		tcp_authopt_free(newsk, new_info);
 		return err;
 	}
-	sk_nocaps_add(newsk, NETIF_F_GSO_MASK);
+	sk_gso_disable(newsk);
 	rcu_assign_pointer(tcp_sk(newsk)->authopt_info, new_info);
 
 	return 0;
