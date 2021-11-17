@@ -1418,7 +1418,7 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 #endif
 #ifdef CONFIG_TCP_AUTHOPT
 	if (opts.authopt_key) {
-		sk_nocaps_add(sk, NETIF_F_GSO_MASK);
+		sk_gso_disable(sk);
 		tcp_authopt_hash(opts.hash_location, opts.authopt_key, opts.authopt_info, sk, skb);
 	}
 	rcu_read_unlock();
