@@ -137,14 +137,14 @@ out:
 
 static struct crypto_shash *tcp_authopt_alg_get_tfm(struct tcp_authopt_alg_imp *alg)
 {
-	preempt_disable();
+	local_bh_disable();
 	return *this_cpu_ptr(alg->tfms);
 }
 
 static void tcp_authopt_alg_put_tfm(struct tcp_authopt_alg_imp *alg, struct crypto_shash *tfm)
 {
 	WARN_ON(tfm != *this_cpu_ptr(alg->tfms));
-	preempt_enable();
+	local_bh_enable();
 }
 
 static struct crypto_shash *tcp_authopt_get_kdf_shash(struct tcp_authopt_key_info *key)
