@@ -282,8 +282,8 @@ static int tcp_set_authopt(int sd, struct sock_args *args)
 			exit(1);
 		}
 		if (args->key_addr_prefix_len) {
-			log_error("TCP_AUTHOPT does not support prefix length\n");
-			exit(1);
+			key.flags |= TCP_AUTHOPT_KEY_PREFIXLEN;
+			key.prefixlen = args->key_addr_prefix_len;
 		}
 	}
 
