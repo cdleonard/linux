@@ -18,7 +18,7 @@ int sysctl_tcp_authopt;
 
 /* This is enabled when first struct tcp_authopt_info is allocated and never released */
 DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed_key);
-EXPORT_SYMBOL(tcp_authopt_needed);
+EXPORT_SYMBOL(tcp_authopt_needed_key);
 
 /* All current algorithms have a mac length of 12 but crypto API digestsize can be larger */
 #define TCP_AUTHOPT_MAXMACBUF			20
@@ -421,7 +421,7 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 		return ERR_PTR(-ENOMEM);
 
 	/* Never released: */
-	static_branch_inc(&tcp_authopt_needed);
+	static_branch_inc(&tcp_authopt_needed_key);
 	sk_gso_disable(sk);
 	INIT_HLIST_HEAD(&info->head);
 	rcu_assign_pointer(tp->authopt_info, info);
