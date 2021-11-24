@@ -914,8 +914,6 @@ ipv6_tcp_authopt_novrf()
 	sleep 1
 	run_cmd_nsb nettest -6 -r ${NSA_IP6} -A ${MD5_PW}
 	log_test $? 2 "AO: Client address does not match address configured on server"
-
-	# no prefixlen for AO yet
 }
 
 ipv4_tcp_authopt_vrf()
@@ -1056,14 +1054,14 @@ ipv6_tcp_authopt_vrf()
 	run_cmd nettest -6 -s -I ${VRF} -A ${MD5_PW} -m ${NS_NET6} &
 	run_cmd nettest -6 -s -A ${MD5_WRONG_PW} -m ${NS_NET6} &
 	sleep 1
-	run_cmd_nsb nettest -6 -r ${NSA_IP6} -X ${MD5_PW}
+	run_cmd_nsb nettest -6 -r ${NSA_IP6} -A ${MD5_PW}
 	log_test $? 0 "AO: VRF: Prefix config in default VRF and VRF, conn in VRF"
 
 	log_start
 	run_cmd nettest -6 -s -I ${VRF} -A ${MD5_PW} -m ${NS_NET6} &
 	run_cmd nettest -6 -s -A ${MD5_WRONG_PW} -m ${NS_NET6} &
 	sleep 1
-	run_cmd_nsc nettest -6 -r ${NSA_IP6} -X ${MD5_WRONG_PW}
+	run_cmd_nsc nettest -6 -r ${NSA_IP6} -A ${MD5_WRONG_PW}
 	log_test $? 0 "AO: VRF: Prefix config in default VRF and VRF, conn in default VRF"
 
 	log_start
@@ -1071,7 +1069,7 @@ ipv6_tcp_authopt_vrf()
 	run_cmd nettest -6 -s -I ${VRF} -A ${MD5_PW} -m ${NS_NET6} &
 	run_cmd nettest -6 -s -A ${MD5_WRONG_PW} -m ${NS_NET6} &
 	sleep 1
-	run_cmd_nsc nettest -6 -r ${NSA_IP6} -X ${MD5_PW}
+	run_cmd_nsc nettest -6 -r ${NSA_IP6} -A ${MD5_PW}
 	log_test $? 2 "AO: VRF: Prefix config in default VRF and VRF, conn in default VRF with VRF pw"
 
 	log_start
@@ -1079,7 +1077,7 @@ ipv6_tcp_authopt_vrf()
 	run_cmd nettest -6 -s -I ${VRF} -A ${MD5_PW} -m ${NS_NET6} &
 	run_cmd nettest -6 -s -A ${MD5_WRONG_PW} -m ${NS_NET6} &
 	sleep 1
-	run_cmd_nsb nettest -6 -r ${NSA_IP6} -X ${MD5_WRONG_PW}
+	run_cmd_nsb nettest -6 -r ${NSA_IP6} -A ${MD5_WRONG_PW}
 	log_test $? 2 "AO: VRF: Prefix config in default VRF and VRF, conn in VRF with default VRF pw"
 }
 
