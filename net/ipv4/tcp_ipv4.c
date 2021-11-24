@@ -763,7 +763,7 @@ static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 	/* Unlike TCP-MD5 the signatures for TCP-AO depend on initial sequence
 	 * numbers so we can only handle established and time-wait sockets.
 	 */
-	if (static_branch_unlikely(&tcp_authopt_needed) && sk &&
+	if (tcp_authopt_needed && sk &&
 	    sk->sk_state != TCP_NEW_SYN_RECV &&
 	    sk->sk_state != TCP_LISTEN) {
 		int tcp_authopt_ret = tcp_v4_authopt_handle_reply(sk, skb, rep.opt, &rep.th);
@@ -949,7 +949,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 	rep.th.window  = htons(win);
 
 #ifdef CONFIG_TCP_AUTHOPT
-	if (static_branch_unlikely(&tcp_authopt_needed)) {
+	if (tcp_authopt_needed) {
 		int aoret, offset = (tsecr) ? 3 : 0;
 
 		aoret = tcp_v4_authopt_handle_reply(sk, skb, &rep.opt[offset], &rep.th);
@@ -2056,7 +2056,7 @@ static int tcp_v4_auth_inbound_check_req(struct request_sock *req,
 	struct sock *lsk = req->rsk_listener;
 	int aoret = 0;
 
-	if (static_branch_unlikely(&tcp_authopt_needed)) {
+	if (tcp_authopt_needed) {
 		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(lsk)->authopt_info);
 
 		if (info)

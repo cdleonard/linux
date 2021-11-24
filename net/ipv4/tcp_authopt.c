@@ -17,7 +17,7 @@
 int sysctl_tcp_authopt;
 
 /* This is enabled when first struct tcp_authopt_info is allocated and never released */
-DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed);
+DEFINE_STATIC_KEY_FALSE(tcp_authopt_needed_key);
 EXPORT_SYMBOL(tcp_authopt_needed);
 
 /* All current algorithms have a mac length of 12 but crypto API digestsize can be larger */
