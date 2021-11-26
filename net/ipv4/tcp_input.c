@@ -4069,7 +4069,6 @@ out:
 
 	return 0;
 }
-EXPORT_SYMBOL(tcp_parse_sig_options);
 
 const u8 *tcp_parse_md5sig_option(const struct tcphdr *th) {
 	const u8 *md5, *ao;
