@@ -22,6 +22,12 @@ int tcp_authopt_needed = 0;
 #define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN		20
 #define TCP_AUTHOPT_MACLEN			12
 
+/* Upstream added sk_gso_disable, insert an equivalent for backport. */
+static inline void sk_gso_disable(struct sock *sk)
+{
+	sk_nocaps_add(sk, NETIF_F_GSO_MASK);
+}
+
 /* Constant data with per-algorithm information from RFC5926
  * The "KDF" and "MAC" happen to be the same for both algorithms.
  */
