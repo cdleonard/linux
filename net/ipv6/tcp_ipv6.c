@@ -1533,10 +1533,7 @@ static void tcp_v6_fill_cb(struct sk_buff *skb, const struct ipv6hdr *hdr,
 			skb->tstamp || skb_hwtstamps(skb)->hwtstamp;
 }
 
-static int tcp_v6_sig_check(struct sock *sk,
-			    struct sk_buff *skb,
-			    int dif,
-			    int sdif)
+static int tcp_v6_sig_check(struct sock *sk, struct sk_buff *skb)
 {
 	const u8 *md5, *ao;
 	int ret;
@@ -1552,10 +1549,7 @@ static int tcp_v6_sig_check(struct sock *sk,
 	return tcp_v6_inbound_md5_hash(sk, skb, md5);
 }
 
-static int tcp_v6_sig_check_req(struct request_sock *req,
-				struct sk_buff *skb,
-				int dif,
-				int sdif)
+static int tcp_v6_sig_check_req(struct request_sock *req, struct sk_buff *skb)
 {
 	struct sock *lsk = req->rsk_listener;
 	const u8 *md5, *ao;
@@ -1624,7 +1618,7 @@ process:
 		struct sock *nsk;
 
 		sk = req->rsk_listener;
-		if (tcp_v6_sig_check_req(req, skb, dif, sdif)) {
+		if (tcp_v6_sig_check_req(req, skb)) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
 			goto discard_it;
@@ -1679,7 +1673,7 @@ process:
 	if (!xfrm6_policy_check(sk, XFRM_POLICY_IN, skb))
 		goto discard_and_relse;
 
-	if (tcp_v6_sig_check(sk, skb, dif, sdif))
+	if (tcp_v6_sig_check(sk, skb))
 		goto discard_and_relse;
 
 	if (tcp_filter(sk, skb))
