@@ -416,14 +416,7 @@ void tcp_parse_options(const struct net *net, const struct sk_buff *skb,
 int tcp_parse_sig_options(const struct tcphdr *th,
 			  const u8 **md5ptr,
 			  const u8 **aoptr);
-static inline const u8 *tcp_parse_md5sig_option(const struct tcphdr *th) {
-	const u8 *md5, *ao;
-	int ret;
-
-	ret = tcp_parse_sig_options(th, &md5, &ao);
-
-	return (md5 && !ao && !ret) ? md5 : NULL;
-}
+const u8 *tcp_parse_md5sig_option(const struct tcphdr *th);
 
 /*
  *	BPF SKB-less helpers

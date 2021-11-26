@@ -4070,6 +4070,16 @@ out:
 	return 0;
 }
 EXPORT_SYMBOL(tcp_parse_sig_options);
+
+const u8 *tcp_parse_md5sig_option(const struct tcphdr *th) {
+	const u8 *md5, *ao;
+	int ret;
+
+	ret = tcp_parse_sig_options(th, &md5, &ao);
+
+	return (md5 && !ao && !ret) ? md5 : NULL;
+}
+EXPORT_SYMBOL(tcp_parse_md5sig_option);
 #endif
 
 /* Sorry, PAWS as specified is broken wrt. pure-ACKs -DaveM
