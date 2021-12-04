@@ -25,6 +25,11 @@ EXPORT_SYMBOL(tcp_authopt_needed_key);
 #define TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN		20
 #define TCP_AUTHOPT_MACLEN			12
 
+struct tcp_authopt_alg_pool {
+	struct crypto_ahash *tfm;
+	struct ahash_request *req;
+};
+
 /* Constant data with per-algorithm information from RFC5926
  * The "KDF" and "MAC" happen to be the same for both algorithms.
  */
@@ -36,10 +41,10 @@ struct tcp_authopt_alg_imp {
 	/* Length of traffic key */
 	u8 traffic_key_len;
 
-	/* shared crypto_shash */
+	/* shared crypto_ahash */
 	struct mutex init_mutex;
 	bool init_done;
-	struct crypto_shash * __percpu *tfms;
+	struct tcp_authopt_alg_pool __percpu *pool;
 };
 
 static struct tcp_authopt_alg_imp tcp_authopt_alg_list[] = {
@@ -65,27 +70,47 @@ static inline struct tcp_authopt_alg_imp *tcp_authopt_alg_get(int alg_num)
 	return &tcp_authopt_alg_list[alg_num - 1];
 }
 
+static int tcp_authopt_alg_pool_init(struct tcp_authopt_alg_imp *alg,
+				     struct tcp_authopt_alg_pool *pool)
+{
+	pool->tfm = crypto_alloc_ahash(alg->alg_name, 0, CRYPTO_ALG_ASYNC);
+	if (IS_ERR(pool->tfm))
+		return PTR_ERR(pool->tfm);
+
+	pool->req = ahash_request_alloc(pool->tfm, GFP_ATOMIC);
+	if (IS_ERR(pool->req))
+		return PTR_ERR(pool->req);
+	ahash_request_set_callback(pool->req, 0, NULL, NULL);
+
+	return 0;
+}
+
+static void tcp_authopt_alg_pool_free(struct tcp_authopt_alg_pool *pool)
+{
+	ahash_request_free(pool->req);
+	pool->req = NULL;
+	crypto_free_ahash(pool->tfm);
+	pool->tfm = NULL;
+}
+
 static void __tcp_authopt_alg_free(struct tcp_authopt_alg_imp *alg)
 {
 	int cpu;
-	struct crypto_shash *tfm;
+	struct tcp_authopt_alg_pool *pool;
 
-	if (!alg->tfms)
+	if (!alg->pool)
 		return;
 	for_each_possible_cpu(cpu) {
-		tfm = *per_cpu_ptr(alg->tfms, cpu);
-		if (tfm) {
-			crypto_free_shash(tfm);
-			*per_cpu_ptr(alg->tfms, cpu) = NULL;
-		}
+		pool = per_cpu_ptr(alg->pool, cpu);
+		tcp_authopt_alg_pool_free(pool);
 	}
-	free_percpu(alg->tfms);
-	alg->tfms = NULL;
+	free_percpu(alg->pool);
+	alg->pool = NULL;
 }
 
 static int __tcp_authopt_alg_init(struct tcp_authopt_alg_imp *alg)
 {
-	struct crypto_shash *tfm;
+	struct tcp_authopt_alg_pool *pool;
 	int cpu;
 	int err;
 
@@ -93,27 +118,25 @@ static int __tcp_authopt_alg_init(struct tcp_authopt_alg_imp *alg)
 	if (WARN_ON_ONCE(alg->traffic_key_len > TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN))
 		return -ENOBUFS;
 
-	alg->tfms = alloc_percpu(struct crypto_shash *);
-	if (!alg->tfms)
+	alg->pool = alloc_percpu(struct tcp_authopt_alg_pool);
+	if (!alg->pool)
 		return -ENOMEM;
 	for_each_possible_cpu(cpu) {
-		tfm = crypto_alloc_shash(alg->alg_name, 0, 0);
-		if (IS_ERR(tfm)) {
-			err = PTR_ERR(tfm);
+		pool = per_cpu_ptr(alg->pool, cpu);
+		err = tcp_authopt_alg_pool_init(alg, pool);
+		if (err)
 			goto out_err;
-		}
 
+		pool = per_cpu_ptr(alg->pool, cpu);
 		/* sanity checks: */
-		if (WARN_ON_ONCE(crypto_shash_digestsize(tfm) != alg->traffic_key_len)) {
+		if (WARN_ON_ONCE(crypto_ahash_digestsize(pool->tfm) != alg->traffic_key_len)) {
 			err = -EINVAL;
 			goto out_err;
 		}
-		if (WARN_ON_ONCE(crypto_shash_digestsize(tfm) > TCP_AUTHOPT_MAXMACBUF)) {
+		if (WARN_ON_ONCE(crypto_ahash_digestsize(pool->tfm) > TCP_AUTHOPT_MAXMACBUF)) {
 			err = -EINVAL;
 			goto out_err;
 		}
-
-		*per_cpu_ptr(alg->tfms, cpu) = tfm;
 	}
 	return 0;
 
@@ -140,38 +163,38 @@ out:
 	return err;
 }
 
-static struct crypto_shash *tcp_authopt_alg_get_tfm(struct tcp_authopt_alg_imp *alg)
+static struct tcp_authopt_alg_pool *tcp_authopt_alg_get_pool(struct tcp_authopt_alg_imp *alg)
 {
 	local_bh_disable();
-	return *this_cpu_ptr(alg->tfms);
+	return this_cpu_ptr(alg->pool);
 }
 
-static void tcp_authopt_alg_put_tfm(struct tcp_authopt_alg_imp *alg, struct crypto_shash *tfm)
+static void tcp_authopt_alg_put_pool(struct tcp_authopt_alg_imp *alg, struct tcp_authopt_alg_pool *pool)
 {
-	WARN_ON(tfm != *this_cpu_ptr(alg->tfms));
+	WARN_ON(pool != this_cpu_ptr(alg->pool));
 	local_bh_enable();
 }
 
-static struct crypto_shash *tcp_authopt_get_kdf_shash(struct tcp_authopt_key_info *key)
+static struct tcp_authopt_alg_pool *tcp_authopt_get_kdf_pool(struct tcp_authopt_key_info *key)
 {
-	return tcp_authopt_alg_get_tfm(key->alg);
+	return tcp_authopt_alg_get_pool(key->alg);
 }
 
-static void tcp_authopt_put_kdf_shash(struct tcp_authopt_key_info *key,
-				      struct crypto_shash *tfm)
+static void tcp_authopt_put_kdf_pool(struct tcp_authopt_key_info *key,
+				      struct tcp_authopt_alg_pool *pool)
 {
-	return tcp_authopt_alg_put_tfm(key->alg, tfm);
+	return tcp_authopt_alg_put_pool(key->alg, pool);
 }
 
-static struct crypto_shash *tcp_authopt_get_mac_shash(struct tcp_authopt_key_info *key)
+static struct tcp_authopt_alg_pool *tcp_authopt_get_mac_pool(struct tcp_authopt_key_info *key)
 {
-	return tcp_authopt_alg_get_tfm(key->alg);
+	return tcp_authopt_alg_get_pool(key->alg);
 }
 
-static void tcp_authopt_put_mac_shash(struct tcp_authopt_key_info *key,
-				      struct crypto_shash *tfm)
+static void tcp_authopt_put_mac_pool(struct tcp_authopt_key_info *key,
+				      struct tcp_authopt_alg_pool *pool)
 {
-	return tcp_authopt_alg_put_tfm(key->alg, tfm);
+	return tcp_authopt_alg_put_pool(key->alg, pool);
 }
 
 /* checks that ipv4 or ipv6 addr matches. */
@@ -877,8 +900,21 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	return 0;
 }
 
-/* feed traffic key into shash */
-static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
+/* Feed one buffer into ahash
+ * The buffer is assumed to be DMA-able
+ */
+static int crypto_ahash_buf(struct ahash_request *req, u8 *buf, uint len)
+{
+	struct scatterlist sg;
+
+	sg_init_one(&sg, buf, len);
+	ahash_request_set_crypt(req, &sg, NULL, len);
+
+	return crypto_ahash_update(req);
+}
+
+/* feed traffic key into ahash */
+static int tcp_authopt_ahash_traffic_key(struct tcp_authopt_alg_pool *pool,
 					 struct sock *sk,
 					 struct sk_buff *skb,
 					 struct tcp_authopt_info *info,
@@ -888,10 +924,10 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	struct tcphdr *th = tcp_hdr(skb);
 	int err;
 	__be32 sisn, disn;
-	__be16 digestbits = htons(crypto_shash_digestsize(desc->tfm) * 8);
+	__be16 digestbits = htons(crypto_ahash_digestsize(pool->tfm) * 8);
 
 	// RFC5926 section 3.1.1.1
-	err = crypto_shash_update(desc, "\x01TCP-AO", 7);
+	err = crypto_ahash_buf(pool->req, "\x01TCP-AO", 7);
 	if (err)
 		return err;
 
@@ -900,43 +936,43 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 	 */
 	if (input) {
 		if (ipv6)
-			err = crypto_shash_update(desc, (u8 *)&ipv6_hdr(skb)->saddr, 32);
+			err = crypto_ahash_buf(pool->req, (u8 *)&ipv6_hdr(skb)->saddr, 32);
 		else
-			err = crypto_shash_update(desc, (u8 *)&ip_hdr(skb)->saddr, 8);
+			err = crypto_ahash_buf(pool->req, (u8 *)&ip_hdr(skb)->saddr, 8);
 		if (err)
 			return err;
 	} else {
 		if (ipv6) {
-			err = crypto_shash_update(desc, (u8 *)&sk->sk_v6_rcv_saddr, 16);
+			err = crypto_ahash_buf(pool->req, (u8 *)&sk->sk_v6_rcv_saddr, 16);
 			if (err)
 				return err;
-			err = crypto_shash_update(desc, (u8 *)&sk->sk_v6_daddr, 16);
+			err = crypto_ahash_buf(pool->req, (u8 *)&sk->sk_v6_daddr, 16);
 			if (err)
 				return err;
 		} else {
-			err = crypto_shash_update(desc, (u8 *)&sk->sk_rcv_saddr, 4);
+			err = crypto_ahash_buf(pool->req, (u8 *)&sk->sk_rcv_saddr, 4);
 			if (err)
 				return err;
-			err = crypto_shash_update(desc, (u8 *)&sk->sk_daddr, 4);
+			err = crypto_ahash_buf(pool->req, (u8 *)&sk->sk_daddr, 4);
 			if (err)
 				return err;
 		}
 	}
 
 	/* TCP ports from header */
-	err = crypto_shash_update(desc, (u8 *)&th->source, 4);
+	err = crypto_ahash_buf(pool->req, (u8 *)&th->source, 4);
 	if (err)
 		return err;
 	err = tcp_authopt_get_isn(sk, info, skb, input, &sisn, &disn);
 	if (err)
 		return err;
-	err = crypto_shash_update(desc, (u8 *)&sisn, 4);
+	err = crypto_ahash_buf(pool->req, (u8 *)&sisn, 4);
 	if (err)
 		return err;
-	err = crypto_shash_update(desc, (u8 *)&disn, 4);
+	err = crypto_ahash_buf(pool->req, (u8 *)&disn, 4);
 	if (err)
 		return err;
-	err = crypto_shash_update(desc, (u8 *)&digestbits, 2);
+	err = crypto_ahash_buf(pool->req, (u8 *)&digestbits, 2);
 	if (err)
 		return err;
 
@@ -946,29 +982,36 @@ static int tcp_authopt_shash_traffic_key(struct shash_desc *desc,
 /* Convert a variable-length key to a 16-byte fixed-length key for AES-CMAC
  * This is described in RFC5926 section 3.1.1.2
  */
-static int aes_setkey_derived(struct crypto_shash *tfm, u8 *key, size_t keylen)
+static int aes_setkey_derived(struct crypto_ahash *tfm, struct ahash_request *req,
+				u8 *key, size_t keylen)
 {
 	static const u8 zeros[16] = {0};
+	struct scatterlist sg;
 	u8 derived_key[16];
 	int err;
 
-	if (WARN_ON_ONCE(crypto_shash_digestsize(tfm) != 16))
+	if (WARN_ON_ONCE(crypto_ahash_digestsize(tfm) != sizeof(derived_key)))
 		return -EINVAL;
-	err = crypto_shash_setkey(tfm, zeros, sizeof(zeros));
+	err = crypto_ahash_setkey(tfm, zeros, sizeof(zeros));
 	if (err)
 		return err;
-	err = crypto_shash_tfm_digest(tfm, key, keylen, derived_key);
+	err = crypto_ahash_init(req);
 	if (err)
 		return err;
-	return crypto_shash_setkey(tfm, derived_key, sizeof(derived_key));
+	sg_init_one(&sg, key, keylen);
+	ahash_request_set_crypt(req, &sg, derived_key, keylen);
+	err = crypto_ahash_digest(req);
+	if (err)
+		return err;
+	return crypto_ahash_setkey(tfm, derived_key, sizeof(derived_key));
 }
 
-static int tcp_authopt_setkey(struct crypto_shash *tfm, struct tcp_authopt_key_info *key)
+static int tcp_authopt_setkey(struct crypto_ahash *tfm, struct ahash_request *req, struct tcp_authopt_key_info *key)
 {
 	if (key->alg_id == TCP_AUTHOPT_ALG_AES_128_CMAC_96 && key->keylen != 16)
-		return aes_setkey_derived(tfm, key->key, key->keylen);
+		return aes_setkey_derived(tfm, req, key->key, key->keylen);
 	else
-		return crypto_shash_setkey(tfm, key->key, key->keylen);
+		return crypto_ahash_setkey(tfm, key->key, key->keylen);
 }
 
 static int tcp_authopt_get_traffic_key(struct sock *sk,
@@ -979,33 +1022,31 @@ static int tcp_authopt_get_traffic_key(struct sock *sk,
 				       bool ipv6,
 				       u8 *traffic_key)
 {
-	SHASH_DESC_ON_STACK(desc, kdf_tfm);
-	struct crypto_shash *kdf_tfm;
+	struct tcp_authopt_alg_pool *pool;
 	int err;
 
-	kdf_tfm = tcp_authopt_get_kdf_shash(key);
-	if (IS_ERR(kdf_tfm))
-		return PTR_ERR(kdf_tfm);
+	pool = tcp_authopt_get_kdf_pool(key);
+	if (IS_ERR(pool))
+		return PTR_ERR(pool);
 
-	err = tcp_authopt_setkey(kdf_tfm, key);
+	err = tcp_authopt_setkey(pool->tfm, pool->req, key);
+	if (err)
+		goto out;
+	err = crypto_ahash_init(pool->req);
 	if (err)
 		goto out;
 
-	desc->tfm = kdf_tfm;
-	err = crypto_shash_init(desc);
+	err = tcp_authopt_ahash_traffic_key(pool, sk, skb, info, input, ipv6);
 	if (err)
 		goto out;
 
-	err = tcp_authopt_shash_traffic_key(desc, sk, skb, info, input, ipv6);
+	ahash_request_set_crypt(pool->req, NULL, traffic_key, 0);
+	err = crypto_ahash_final(pool->req);
 	if (err)
-		goto out;
-
-	err = crypto_shash_final(desc, traffic_key);
-	if (err)
-		goto out;
+		return err;
 
 out:
-	tcp_authopt_put_kdf_shash(key, kdf_tfm);
+	tcp_authopt_put_kdf_pool(key, pool);
 	return err;
 }
 
@@ -1029,28 +1070,25 @@ static int tcp_v4_authopt_get_traffic_key_noskb(struct tcp_authopt_key_info *key
 						u8 *traffic_key)
 {
 	int err;
-	struct crypto_shash *kdf_tfm;
-	SHASH_DESC_ON_STACK(desc, kdf_tfm);
+	struct tcp_authopt_alg_pool *pool;
 	struct tcp_v4_authopt_context_data data;
 
 	BUILD_BUG_ON(sizeof(data) != 22);
 
-	kdf_tfm = tcp_authopt_get_kdf_shash(key);
-	if (IS_ERR(kdf_tfm))
-		return PTR_ERR(kdf_tfm);
+	pool = tcp_authopt_get_kdf_pool(key);
+	if (IS_ERR(pool))
+		return PTR_ERR(pool);
 
-	err = tcp_authopt_setkey(kdf_tfm, key);
+	err = tcp_authopt_setkey(pool->tfm, pool->req, key);
 	if (err)
 		goto out;
-
-	desc->tfm = kdf_tfm;
-	err = crypto_shash_init(desc);
+	err = crypto_ahash_init(pool->req);
 	if (err)
 		goto out;
 
 	// RFC5926 section 3.1.1.1
 	// Separate to keep alignment semi-sane
-	err = crypto_shash_update(desc, "\x01TCP-AO", 7);
+	err = crypto_ahash_buf(pool->req, "\x01TCP-AO", 7);
 	if (err)
 		return err;
 	data.saddr = saddr;
@@ -1059,27 +1097,28 @@ static int tcp_v4_authopt_get_traffic_key_noskb(struct tcp_authopt_key_info *key
 	data.dport = dport;
 	data.sisn = sisn;
 	data.disn = disn;
-	data.digestbits = htons(crypto_shash_digestsize(desc->tfm) * 8);
+	data.digestbits = htons(crypto_ahash_digestsize(pool->tfm) * 8);
 
-	err = crypto_shash_update(desc, (u8 *)&data, sizeof(data));
+	err = crypto_ahash_buf(pool->req, (u8 *)&data, sizeof(data));
 	if (err)
 		goto out;
-	err = crypto_shash_final(desc, traffic_key);
+	ahash_request_set_crypt(pool->req, NULL, traffic_key, 0);
+	err = crypto_ahash_final(pool->req);
 	if (err)
 		goto out;
 
 out:
-	tcp_authopt_put_kdf_shash(key, kdf_tfm);
+	tcp_authopt_put_kdf_pool(key, pool);
 	return err;
 }
 
-static int crypto_shash_update_zero(struct shash_desc *desc, int len)
+static int crypto_ahash_buf_zero(struct ahash_request *req, int len)
 {
 	u8 zero = 0;
 	int i, err;
 
 	for (i = 0; i < len; ++i) {
-		err = crypto_shash_update(desc, &zero, 1);
+		err = crypto_ahash_buf(req, &zero, 1);
 		if (err)
 			return err;
 	}
@@ -1087,7 +1126,7 @@ static int crypto_shash_update_zero(struct shash_desc *desc, int len)
 	return 0;
 }
 
-static int tcp_authopt_hash_tcp4_pseudoheader(struct shash_desc *desc,
+static int tcp_authopt_hash_tcp4_pseudoheader(struct tcp_authopt_alg_pool *pool,
 					      __be32 saddr,
 					      __be32 daddr,
 					      int nbytes)
@@ -1099,10 +1138,10 @@ static int tcp_authopt_hash_tcp4_pseudoheader(struct shash_desc *desc,
 		.protocol = IPPROTO_TCP,
 		.len = htons(nbytes)
 	};
-	return crypto_shash_update(desc, (u8 *)&phdr, sizeof(phdr));
+	return crypto_ahash_buf(pool->req, (u8 *)&phdr, sizeof(phdr));
 }
 
-static int tcp_authopt_hash_tcp6_pseudoheader(struct shash_desc *desc,
+static int tcp_authopt_hash_tcp6_pseudoheader(struct tcp_authopt_alg_pool *pool,
 					      struct in6_addr *saddr,
 					      struct in6_addr *daddr,
 					      u32 plen)
@@ -1113,13 +1152,13 @@ static int tcp_authopt_hash_tcp6_pseudoheader(struct shash_desc *desc,
 	buf[0] = htonl(plen);
 	buf[1] = htonl(IPPROTO_TCP);
 
-	err = crypto_shash_update(desc, (u8 *)saddr, sizeof(*saddr));
+	err = crypto_ahash_buf(pool->req, (u8 *)saddr, sizeof(*saddr));
 	if (err)
 		return err;
-	err = crypto_shash_update(desc, (u8 *)daddr, sizeof(*daddr));
+	err = crypto_ahash_buf(pool->req, (u8 *)daddr, sizeof(*daddr));
 	if (err)
 		return err;
-	return crypto_shash_update(desc, (u8 *)&buf, sizeof(buf));
+	return crypto_ahash_buf(pool->req, (u8 *)&buf, sizeof(buf));
 }
 
 /** Hash tcphdr options.
@@ -1127,7 +1166,7 @@ static int tcp_authopt_hash_tcp6_pseudoheader(struct shash_desc *desc,
  * If include_options is false then only the TCPOPT_AUTHOPT option itself is hashed
  * Point to AO inside TH is passed by the caller
  */
-static int tcp_authopt_hash_opts(struct shash_desc *desc,
+static int tcp_authopt_hash_opts(struct tcp_authopt_alg_pool *pool,
 				 struct tcphdr *th,
 				 struct tcphdr_authopt *aoptr,
 				 bool include_options)
@@ -1146,21 +1185,20 @@ static int tcp_authopt_hash_opts(struct shash_desc *desc,
 		/* end of options */
 		u8 *tcp_data = ((u8 *)th) + th->doff * 4;
 
-		err = crypto_shash_update(desc, tcp_opts, aobuf - tcp_opts + 4);
+		err = crypto_ahash_buf(pool->req, tcp_opts, aobuf - tcp_opts + 4);
 		if (err)
 			return err;
-		err = crypto_shash_update_zero(desc, aolen - 4);
+		err = crypto_ahash_buf_zero(pool->req, aolen - 4);
 		if (err)
 			return err;
-		err = crypto_shash_update(desc, aobuf + aolen,
-					  tcp_data - (aobuf + aolen));
+		err = crypto_ahash_buf(pool->req, aobuf + aolen, tcp_data - (aobuf + aolen));
 		if (err)
 			return err;
 	} else {
-		err = crypto_shash_update(desc, aobuf, 4);
+		err = crypto_ahash_buf(pool->req, aobuf, 4);
 		if (err)
 			return err;
-		err = crypto_shash_update_zero(desc, aolen - 4);
+		err = crypto_ahash_buf_zero(pool->req, aolen - 4);
 		if (err)
 			return err;
 	}
@@ -1168,7 +1206,7 @@ static int tcp_authopt_hash_opts(struct shash_desc *desc,
 	return 0;
 }
 
-static int skb_shash_frags(struct shash_desc *desc,
+static int skb_shash_frags(struct tcp_authopt_alg_pool *pool,
 			   struct sk_buff *skb)
 {
 	struct sk_buff *frag_iter;
@@ -1183,7 +1221,7 @@ static int skb_shash_frags(struct shash_desc *desc,
 		skb_frag_foreach_page(f, skb_frag_off(f), skb_frag_size(f),
 				      p, p_off, p_len, copied) {
 			vaddr = kmap_atomic(p);
-			err = crypto_shash_update(desc, vaddr + p_off, p_len);
+			err = crypto_ahash_buf(pool->req, vaddr + p_off, p_len);
 			kunmap_atomic(vaddr);
 			if (err)
 				return err;
@@ -1191,7 +1229,7 @@ static int skb_shash_frags(struct shash_desc *desc,
 	}
 
 	skb_walk_frags(skb, frag_iter) {
-		err = skb_shash_frags(desc, frag_iter);
+		err = skb_shash_frags(pool, frag_iter);
 		if (err)
 			return err;
 	}
@@ -1286,7 +1324,7 @@ static int compute_packet_sne(struct sock *sk, struct tcp_authopt_info *info,
 	return 0;
 }
 
-static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
+static int tcp_authopt_hash_packet(struct tcp_authopt_alg_pool *pool,
 				   struct sock *sk,
 				   struct sk_buff *skb,
 				   struct tcphdr_authopt *aoptr,
@@ -1297,7 +1335,6 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 				   u8 *macbuf)
 {
 	struct tcphdr *th = tcp_hdr(skb);
-	SHASH_DESC_ON_STACK(desc, tfm);
 	__be32 sne = 0;
 	int err;
 
@@ -1305,12 +1342,11 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 	if (err)
 		return err;
 
-	desc->tfm = tfm;
-	err = crypto_shash_init(desc);
+	err = crypto_ahash_init(pool->req);
 	if (err)
 		return err;
 
-	err = crypto_shash_update(desc, (u8 *)&sne, 4);
+	err = crypto_ahash_buf(pool->req, (u8 *)&sne, 4);
 	if (err)
 		return err;
 
@@ -1325,7 +1361,7 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 			saddr = &sk->sk_v6_rcv_saddr;
 			daddr = &sk->sk_v6_daddr;
 		}
-		err = tcp_authopt_hash_tcp6_pseudoheader(desc, saddr, daddr, skb->len);
+		err = tcp_authopt_hash_tcp6_pseudoheader(pool, saddr, daddr, skb->len);
 		if (err)
 			return err;
 	} else {
@@ -1339,7 +1375,7 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 			saddr = sk->sk_rcv_saddr;
 			daddr = sk->sk_daddr;
 		}
-		err = tcp_authopt_hash_tcp4_pseudoheader(desc, saddr, daddr, skb->len);
+		err = tcp_authopt_hash_tcp4_pseudoheader(pool, saddr, daddr, skb->len);
 		if (err)
 			return err;
 	}
@@ -1349,26 +1385,27 @@ static int tcp_authopt_hash_packet(struct crypto_shash *tfm,
 		struct tcphdr hashed_th = *th;
 
 		hashed_th.check = 0;
-		err = crypto_shash_update(desc, (u8 *)&hashed_th, sizeof(hashed_th));
+		err = crypto_ahash_buf(pool->req, (u8 *)&hashed_th, sizeof(hashed_th));
 		if (err)
 			return err;
 	}
 
 	// TCP options
-	err = tcp_authopt_hash_opts(desc, th, aoptr, include_options);
+	err = tcp_authopt_hash_opts(pool, th, aoptr, include_options);
 	if (err)
 		return err;
 
 	// Rest of SKB->data
-	err = crypto_shash_update(desc, (u8 *)th + th->doff * 4, skb_headlen(skb) - th->doff * 4);
+	err = crypto_ahash_buf(pool->req, (u8 *)th + th->doff * 4, skb_headlen(skb) - th->doff * 4);
 	if (err)
 		return err;
 
-	err = skb_shash_frags(desc, skb);
+	err = skb_shash_frags(pool, skb);
 	if (err)
 		return err;
 
-	return crypto_shash_final(desc, macbuf);
+	ahash_request_set_crypt(pool->req, NULL, macbuf, 0);
+	return crypto_ahash_final(pool->req);
 }
 
 /* __tcp_authopt_calc_mac - Compute packet MAC using key
@@ -1385,7 +1422,7 @@ static int __tcp_authopt_calc_mac(struct sock *sk,
 				  bool input,
 				  char *macbuf)
 {
-	struct crypto_shash *mac_tfm;
+	struct tcp_authopt_alg_pool *mac_pool;
 	u8 traffic_key[TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN];
 	int err;
 	bool ipv6 = (sk->sk_family != AF_INET);
@@ -1397,14 +1434,17 @@ static int __tcp_authopt_calc_mac(struct sock *sk,
 	if (err)
 		return err;
 
-	mac_tfm = tcp_authopt_get_mac_shash(key);
-	if (IS_ERR(mac_tfm))
-		return PTR_ERR(mac_tfm);
-	err = crypto_shash_setkey(mac_tfm, traffic_key, key->alg->traffic_key_len);
+	mac_pool = tcp_authopt_get_mac_pool(key);
+	if (IS_ERR(mac_pool))
+		return PTR_ERR(mac_pool);
+	err = crypto_ahash_setkey(mac_pool->tfm, traffic_key, key->alg->traffic_key_len);
 	if (err)
 		goto out;
+	err = crypto_ahash_init(mac_pool->req);
+	if (err)
+		return err;
 
-	err = tcp_authopt_hash_packet(mac_tfm,
+	err = tcp_authopt_hash_packet(mac_pool,
 				      sk,
 				      skb,
 				      aoptr,
@@ -1415,7 +1455,7 @@ static int __tcp_authopt_calc_mac(struct sock *sk,
 				      macbuf);
 
 out:
-	tcp_authopt_put_mac_shash(key, mac_tfm);
+	tcp_authopt_put_mac_pool(key, mac_pool);
 	return err;
 }
 
@@ -1469,10 +1509,9 @@ int tcp_v4_authopt_hash_reply(char *hash_location,
 			      __be32 daddr,
 			      struct tcphdr *th)
 {
-	struct crypto_shash *mac_tfm;
+	struct tcp_authopt_alg_pool *pool;
 	u8 macbuf[TCP_AUTHOPT_MAXMACBUF];
 	u8 traffic_key[TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN];
-	SHASH_DESC_ON_STACK(desc, tfm);
 	__be32 sne = 0;
 	int err;
 
@@ -1488,49 +1527,48 @@ int tcp_v4_authopt_hash_reply(char *hash_location,
 		goto out_err_traffic_key;
 
 	/* Init mac shash */
-	mac_tfm = tcp_authopt_get_mac_shash(key);
-	if (IS_ERR(mac_tfm))
-		return PTR_ERR(mac_tfm);
-	err = crypto_shash_setkey(mac_tfm, traffic_key, key->alg->traffic_key_len);
+	pool = tcp_authopt_get_mac_pool(key);
+	if (IS_ERR(pool))
+		return PTR_ERR(pool);
+	err = crypto_ahash_setkey(pool->tfm, traffic_key, key->alg->traffic_key_len);
 	if (err)
 		goto out_err;
-
-	desc->tfm = mac_tfm;
-	err = crypto_shash_init(desc);
+	err = crypto_ahash_init(pool->req);
 	if (err)
 		return err;
 
-	err = crypto_shash_update(desc, (u8 *)&sne, 4);
+	err = crypto_ahash_buf(pool->req, (u8 *)&sne, 4);
 	if (err)
 		return err;
 
-	err = tcp_authopt_hash_tcp4_pseudoheader(desc, saddr, daddr, th->doff * 4);
+	err = tcp_authopt_hash_tcp4_pseudoheader(pool, saddr, daddr, th->doff * 4);
 	if (err)
 		return err;
 
 	// TCP header with checksum set to zero. Caller ensures this.
 	if (WARN_ON_ONCE(th->check != 0))
 		goto out_err;
-	err = crypto_shash_update(desc, (u8 *)th, sizeof(*th));
+	err = crypto_ahash_buf(pool->req, (u8 *)th, sizeof(*th));
 	if (err)
 		goto out_err;
 
 	// TCP options
-	err = tcp_authopt_hash_opts(desc, th, (struct tcphdr_authopt *)(hash_location - 4),
+	err = tcp_authopt_hash_opts(pool, th, (struct tcphdr_authopt *)(hash_location - 4),
 				    !(key->flags & TCP_AUTHOPT_KEY_EXCLUDE_OPTS));
 	if (err)
 		goto out_err;
 
-	err = crypto_shash_final(desc, macbuf);
+	ahash_request_set_crypt(pool->req, NULL, macbuf, 0);
+	err = crypto_ahash_final(pool->req);
 	if (err)
 		goto out_err;
 	memcpy(hash_location, macbuf, TCP_AUTHOPT_MACLEN);
 
-	tcp_authopt_put_mac_shash(key, mac_tfm);
+	tcp_authopt_put_mac_pool(key, pool);
 	return 0;
 
 out_err:
-	tcp_authopt_put_mac_shash(key, mac_tfm);
+	tcp_authopt_put_mac_pool(key, pool);
 out_err_traffic_key:
 	memset(hash_location, 0, TCP_AUTHOPT_MACLEN);
 	return err;
