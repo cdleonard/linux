@@ -1114,13 +1114,19 @@ out:
 
 static int crypto_ahash_buf_zero(struct ahash_request *req, int len)
 {
-	u8 zero = 0;
-	int i, err;
+	u8 zeros[TCP_AUTHOPT_MACLEN] = {0};
+	int buflen, err;
 
-	for (i = 0; i < len; ++i) {
-		err = crypto_ahash_buf(req, &zero, 1);
+	/*
+	 * In practice this is always called with len exactly 12.
+	 * Even on input we drop unusual signature sizes early.
+	 */
+	while (len) {
+		buflen = min_t(int, len, sizeof(zeros));
+		err = crypto_ahash_buf(req, zeros, buflen);
 		if (err)
 			return err;
+		len -= buflen;
 	}
 
 	return 0;
