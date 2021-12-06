@@ -1206,37 +1206,6 @@ static int tcp_authopt_hash_opts(struct tcp_authopt_alg_pool *pool,
 	return 0;
 }
 
-static int skb_shash_frags(struct tcp_authopt_alg_pool *pool,
-			   struct sk_buff *skb)
-{
-	struct sk_buff *frag_iter;
-	int err, i;
-
-	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
-		skb_frag_t *f = &skb_shinfo(skb)->frags[i];
-		u32 p_off, p_len, copied;
-		struct page *p;
-		u8 *vaddr;
-
-		skb_frag_foreach_page(f, skb_frag_off(f), skb_frag_size(f),
-				      p, p_off, p_len, copied) {
-			vaddr = kmap_atomic(p);
-			err = crypto_ahash_buf(pool->req, vaddr + p_off, p_len);
-			kunmap_atomic(vaddr);
-			if (err)
-				return err;
-		}
-	}
-
-	skb_walk_frags(skb, frag_iter) {
-		err = skb_shash_frags(pool, frag_iter);
-		if (err)
-			return err;
-	}
-
-	return 0;
-}
-
 /* compute_sne - Calculate Sequence Number Extension
  *
  * Give old upper/lower 32bit values and a new lower 32bit value determine the
@@ -1396,11 +1365,7 @@ static int tcp_authopt_hash_packet(struct tcp_authopt_alg_pool *pool,
 		return err;
 
 	// Rest of SKB->data
-	err = crypto_ahash_buf(pool->req, (u8 *)th + th->doff * 4, skb_headlen(skb) - th->doff * 4);
-	if (err)
-		return err;
-
-	err = skb_shash_frags(pool, skb);
+	err = tcp_sig_hash_skb_data(pool->req, skb, th->doff);
 	if (err)
 		return err;
 
