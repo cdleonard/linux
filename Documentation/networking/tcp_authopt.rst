@@ -34,6 +34,10 @@ flags in `tcp_authopt_key.flags`. The sort of these "matching criteria" can
 expand over time by increasing the size of `struct tcp_authopt_key` and adding
 new flags.
 
+ * Address binding is optional, by default keys match all addresses
+ * Local address is ignored, matching is done by remote address
+ * Ports are ignored
+
 RFC5925 requires that key ids do not overlap when tcp identifiers (addr/port)
 overlap. This is not enforced by linux, configuring ambiguous keys will result
 in packet drops and lost connections.
