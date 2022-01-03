@@ -323,12 +323,14 @@ static bool tcp_authopt_key_match_sk_addr(struct tcp_authopt_key_info *key,
 		__be32 mask = inet_make_mask(key->prefixlen);
 
 		return (addr_sk->sk_daddr & mask) == key_addr->sin_addr.s_addr;
+#if IS_ENABLED(CONFIG_IPV6)
 	} else if (keyaf == AF_INET6) {
 		struct sockaddr_in6 *key_addr = (struct sockaddr_in6 *)&key->addr;
 
 		return ipv6_prefix_equal(&addr_sk->sk_v6_daddr,
 					 &key_addr->sin6_addr,
 					 key->prefixlen);
+#endif
 	}
 
 	return false;
@@ -1008,12 +1010,16 @@ static int tcp_authopt_ahash_traffic_key(struct tcp_authopt_alg_pool *pool,
 			return err;
 	} else {
 		if (ipv6) {
+#if IS_ENABLED(CONFIG_IPV6)
 			err = crypto_ahash_buf(pool->req, (u8 *)&sk->sk_v6_rcv_saddr, 16);
 			if (err)
 				return err;
 			err = crypto_ahash_buf(pool->req, (u8 *)&sk->sk_v6_daddr, 16);
 			if (err)
 				return err;
+#else
+			return -EINVAL;
+#endif
 		} else {
 			err = crypto_ahash_buf(pool->req, (u8 *)&sk->sk_rcv_saddr, 4);
 			if (err)
@@ -1211,6 +1217,7 @@ static int tcp_authopt_hash_tcp4_pseudoheader(struct tcp_authopt_alg_pool *pool,
 	return crypto_ahash_buf(pool->req, (u8 *)&phdr, sizeof(phdr));
 }
 
+#if IS_ENABLED(CONFIG_IPV6)
 static int tcp_authopt_hash_tcp6_pseudoheader(struct tcp_authopt_alg_pool *pool,
 					      struct in6_addr *saddr,
 					      struct in6_addr *daddr,
@@ -1230,6 +1237,7 @@ static int tcp_authopt_hash_tcp6_pseudoheader(struct tcp_authopt_alg_pool *pool,
 		return err;
 	return crypto_ahash_buf(pool->req, (u8 *)&buf, sizeof(buf));
 }
+#endif
 
 /** Hash tcphdr options.
  *
@@ -1303,6 +1311,7 @@ static int tcp_authopt_hash_packet(struct tcp_authopt_alg_pool *pool,
 		return err;
 
 	if (ipv6) {
+#if IS_ENABLED(CONFIG_IPV6)
 		struct in6_addr *saddr;
 		struct in6_addr *daddr;
 
@@ -1316,6 +1325,9 @@ static int tcp_authopt_hash_packet(struct tcp_authopt_alg_pool *pool,
 		err = tcp_authopt_hash_tcp6_pseudoheader(pool, saddr, daddr, skb->len);
 		if (err)
 			return err;
+#else
+		return -EINVAL;
+#endif
 	} else {
 		__be32 saddr;
 		__be32 daddr;
