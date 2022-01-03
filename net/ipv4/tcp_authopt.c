@@ -1664,6 +1664,7 @@ accept:
 }
 EXPORT_SYMBOL(__tcp_authopt_inbound_check);
 
+#ifdef CONFIG_PROC_FS
 struct tcp_authopt_iter_state {
 	struct seq_net_private p;
 };
@@ -1745,6 +1746,7 @@ static const struct seq_operations tcp_authopt_seq_ops = {
 	.stop		= tcp_authopt_seq_stop,
 	.show		= tcp_authopt_seq_show,
 };
+#endif /* CONFIG_PROC_FS */
 
 static int __net_init tcp_authopt_proc_init_net(struct net *net)
 {
