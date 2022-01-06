@@ -87,9 +87,11 @@ static int tcp_authopt_alg_pool_init(struct tcp_authopt_alg_imp *alg,
 
 static void tcp_authopt_alg_pool_free(struct tcp_authopt_alg_pool *pool)
 {
-	ahash_request_free(pool->req);
+	if (!IS_ERR_OR_NULL(pool->req))
+		ahash_request_free(pool->req);
 	pool->req = NULL;
-	crypto_free_ahash(pool->tfm);
+	if (!IS_ERR_OR_NULL(pool->tfm))
+		crypto_free_ahash(pool->tfm);
 	pool->tfm = NULL;
 }
 
@@ -141,6 +143,7 @@ static int __tcp_authopt_alg_init(struct tcp_authopt_alg_imp *alg)
 	return 0;
 
 out_err:
+	pr_info("Failed to initialize %s\n", alg->alg_name);
 	__tcp_authopt_alg_free(alg);
 	return err;
 }
