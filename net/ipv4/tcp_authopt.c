@@ -549,17 +549,25 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 	int pref_send_id;
 
 	/* Listen sockets don't refer to any specific connection so we don't try
-	 * to keep using the same key and ignore any received keyids.
+	 * to keep using the same key.
+	 * The rnextkeyid is stored in tcp_request_sock
 	 */
 	if (sk->sk_state == TCP_LISTEN) {
+		struct tcp_request_sock *rsk;
+
+		if (WARN_ONCE(addr_sk->sk_state != TCP_NEW_SYN_RECV, "bad socket state"))
+			return NULL;
+		rsk = tcp_rsk((struct request_sock *)addr_sk);
+		/* Forcing a specific send_keyid on a listen socket forces it for
+		 * all clients so is unlikely to be useful.
+		 */
 		if (info->flags & TCP_AUTHOPT_FLAG_LOCK_KEYID)
 			pref_send_id = info->user_pref_send_keyid;
 		else
-			pref_send_id = -1;
+			pref_send_id = rsk->recv_rnextkeyid;
 		key = tcp_authopt_lookup_send(net_ao, addr_sk, pref_send_id, rnextkeyid, &anykey);
 		if (!key && anykey)
 			return ERR_PTR(-ENOKEY);
-
 		return key;
 	}
 
