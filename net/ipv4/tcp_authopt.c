@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "linux/tcp.h"
+#include "net/tcp_states.h"
 #include <net/tcp_authopt.h>
 #include <net/ip.h>
 #include <net/ipv6.h>
@@ -423,17 +425,18 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 	struct netns_tcp_authopt *net = sock_net_tcp_authopt(sk);
 
 	/* Listen sockets don't refer to any specific connection so we don't try
-	 * to keep using the same key and ignore any received keyids.
+	 * to keep using the same key.
+	 * The rnextkeyid is stored in tcp_request_sock
 	 */
 	if (sk->sk_state == TCP_LISTEN) {
-		int send_keyid = -1;
+		struct tcp_request_sock *rsk;
 
-		if (info->flags & TCP_AUTHOPT_FLAG_LOCK_KEYID)
-			send_keyid = info->send_keyid;
-		key = tcp_authopt_lookup_send(net, addr_sk, send_keyid);
+		if (WARN_ONCE(addr_sk->sk_state != TCP_NEW_SYN_RECV, "bad socket state"))
+			return NULL;
+		rsk = tcp_rsk((struct request_sock *)addr_sk);
+		key = tcp_authopt_lookup_send(net, addr_sk, rsk->recv_rnextkeyid);
 		if (key)
 			*rnextkeyid = key->recv_id;
-
 		return key;
 	}
 
