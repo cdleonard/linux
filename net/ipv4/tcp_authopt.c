@@ -1548,6 +1548,20 @@ out_err_traffic_key:
 	return err;
 }
 
+/**
+ * __tcp_authopt_select_key - lookup key for receive
+ *
+ * @sk: Receive socket
+ * @skb: Packet, used to compare addr and iface
+ * @net: Per-namespace information containing keys
+ * @recv_id: Optional recv_id. If >= 0 then only return keys that match
+ * @anykey: Set to true if any keys are present for the peer
+ *
+ * If anykey is false then authentication is not expected from the peer so we
+ * should based on TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED
+ *
+ * If anykey is true then a valid key is required.
+ */
 static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 							    struct sk_buff *skb,
 							    struct netns_tcp_authopt *net,
