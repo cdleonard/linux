@@ -454,7 +454,7 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 	if (locked) {
 		sock_owned_by_me(sk);
 		key = rcu_dereference_protected(info->send_key, lockdep_sock_is_held(sk));
-		if (key && (key->flags | TCP_AUTHOPT_KEY_DEL) == TCP_AUTHOPT_KEY_DEL) {
+		if (key && (key->flags & TCP_AUTHOPT_KEY_DEL) == TCP_AUTHOPT_KEY_DEL) {
 			info->send_key = NULL;
 			tcp_authopt_key_put(key);
 			key = NULL;
