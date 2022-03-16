@@ -1636,26 +1636,6 @@ static void tcp_v6_fill_cb(struct sk_buff *skb, const struct ipv6hdr *hdr,
 			skb->tstamp || skb_hwtstamps(skb)->hwtstamp;
 }
 
-static enum skb_drop_reason tcp_v6_sig_check_req(struct request_sock *req,
-				struct sk_buff *skb,
-				int dif,
-				int sdif)
-{
-	struct sock *lsk = req->rsk_listener;
-	const u8 *md5, *ao;
-	int ret;
-
-	ret = tcp_parse_sig_options(tcp_hdr(skb), &md5, &ao);
-	if (ret)
-		return SKB_DROP_REASON_NOT_SPECIFIED;
-	ret = tcp_authopt_inbound_check_req(req, skb, ao);
-	if (ret < 0)
-		return SKB_DROP_REASON_NOT_SPECIFIED;
-	if (ret == 1)
-		return 0;
-	return tcp_inbound_md5_hash(lsk, skb, dif, sdif, md5);
-}
-
 INDIRECT_CALLABLE_SCOPE int tcp_v6_rcv(struct sk_buff *skb)
 {
 	enum skb_drop_reason drop_reason;
@@ -1712,7 +1692,9 @@ process:
 		struct sock *nsk;
 
 		sk = req->rsk_listener;
-		drop_reason = tcp_v6_sig_check_req(req, skb, dif, sdif);
+		drop_reason = tcp_inbound_sig_hash(sk, skb,
+						   &hdr->saddr, &hdr->daddr,
+						   AF_INET6, dif, sdif);
 		if (drop_reason) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
@@ -1784,8 +1766,8 @@ process:
 		goto discard_and_relse;
 	}
 
-	drop_reason = tcp_inbound_sig_hash(sk, skb, &hdr->saddr, &hdr->daddr,
-					   AF_INET6, dif, sdif);
+	drop_reason = tcp_inbound_sig_hash(sk, skb, &hdr->saddr,
+					   &hdr->daddr, AF_INET6, dif, sdif);
 	if (drop_reason)
 		goto discard_and_relse;
 
