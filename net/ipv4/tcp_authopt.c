@@ -1635,6 +1635,19 @@ static void print_tcpao_notice(const char *msg, struct sk_buff *skb)
 	}
 }
 
+/**
+ * __tcp_authopt_inbound_check - Check inbound TCP authentication option
+ *
+ * @sk: Receive socket. For the SYN_RECV state this must be the request_sock, not the listener
+ * @skb: Input Packet
+ * @info: TCP authentication option information
+ * @_opt: Pointer to TCP authentication option inside the skb
+ *
+ * Return:
+ *  0: Nothing found or expected
+ *  1: Found and verified
+ *  <0: Error
+ */
 int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb,
 				struct tcp_authopt_info *info, const u8 *_opt)
 {
