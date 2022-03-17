@@ -216,28 +216,6 @@ int __tcp_authopt_inbound_check(
 		struct sk_buff *skb,
 		struct tcp_authopt_info *info,
 		const u8 *opt);
-static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, const u8 *opt)
-{
-	if (tcp_authopt_needed) {
-		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(sk)->authopt_info);
-
-		if (info)
-			return __tcp_authopt_inbound_check(sk, skb, info, opt);
-	}
-	return 0;
-}
-static inline int tcp_authopt_inbound_check_req(struct request_sock *req, struct sk_buff *skb,
-						const u8 *opt)
-{
-	if (tcp_authopt_needed) {
-		struct sock *lsk = req->rsk_listener;
-		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(lsk)->authopt_info);
-
-		if (info)
-			return __tcp_authopt_inbound_check((struct sock *)req, skb, info, opt);
-	}
-	return 0;
-}
 void __tcp_authopt_update_rcv_sne(struct tcp_sock *tp, struct tcp_authopt_info *info, u32 seq);
 static inline void tcp_authopt_update_rcv_sne(struct tcp_sock *tp, u32 seq)
 {
@@ -303,15 +281,11 @@ static inline void tcp_authopt_time_wait(
 		struct tcp_sock *tp)
 {
 }
-static inline int tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb, const u8 *opt)
-{
-	return 0;
-}
-static inline int tcp_authopt_inbound_check_req(struct request_sock *sk, struct sk_buff *skb,
-						const u8 *opt)
-{
-	return 0;
-}
+static inline int __tcp_authopt_inbound_check(
+		struct sock *sk,
+		struct sk_buff *skb,
+		struct tcp_authopt_info *info,
+		const u8 *opt);
 static inline void tcp_authopt_update_rcv_sne(struct tcp_sock *tp, u32 seq)
 {
 }
