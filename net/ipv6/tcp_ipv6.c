@@ -1691,10 +1691,10 @@ process:
 		bool req_stolen = false;
 		struct sock *nsk;
 
-		sk = req->rsk_listener;
 		drop_reason = tcp_inbound_sig_hash(sk, skb,
 						   &hdr->saddr, &hdr->daddr,
 						   AF_INET6, dif, sdif);
+		sk = req->rsk_listener;
 		if (drop_reason) {
 			sk_drops_add(sk, skb);
 			reqsk_put(req);
