@@ -4548,16 +4548,28 @@ tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
 	/* FIXME: Restore reqsk handling */
 	const u8 *md5, *ao;
 	int ret;
+	const struct sock *parent_sk;
+
+	if (sk->sk_state == TCP_NEW_SYN_RECV)
+		parent_sk = inet_reqsk(sk)->rsk_listener;
+	else
+		parent_sk = sk;
 
 	ret = tcp_parse_sig_options(tcp_hdr(skb), &md5, &ao);
 	if (ret)
 		return SKB_DROP_REASON_NOT_SPECIFIED;
-	ret = tcp_authopt_inbound_check((struct sock *)sk, (struct sk_buff*)skb, ao);
-	if (ret < 0)
-		return SKB_DROP_REASON_NOT_SPECIFIED;
+	if (tcp_authopt_needed) {
+		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(parent_sk)->authopt_info);
+
+		if (info) {
+			ret = __tcp_authopt_inbound_check((struct sock *)sk, (struct sk_buff*)skb, info, ao);
+			if (ret < 0)
+				return SKB_DROP_REASON_NOT_SPECIFIED;
+		}
+	}
 	if (ret == 1)
 		return SKB_NOT_DROPPED_YET;
-	return tcp_inbound_md5_hash(sk, skb, saddr, daddr, family, dif, sdif, md5);
+	return tcp_inbound_md5_hash(parent_sk, skb, saddr, daddr, family, dif, sdif, md5);
 }
 EXPORT_SYMBOL(tcp_inbound_sig_hash);
 
