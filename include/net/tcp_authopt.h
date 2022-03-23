@@ -66,7 +66,7 @@ struct tcp_authopt_key_info {
 struct tcp_authopt_info {
 	/** @rcu: for kfree_rcu */
 	struct rcu_head rcu;
-	/** @flags: Combination of &enum tcp_authopt_key_flag */
+	/** @flags: Combination of &enum tcp_authopt_flag */
 	u32 flags;
 	/** @src_isn: Local Initial Sequence Number */
 	u32 src_isn;
