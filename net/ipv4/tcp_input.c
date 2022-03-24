@@ -6873,6 +6873,30 @@ u16 tcp_get_syncookie_mss(struct request_sock_ops *rsk_ops,
 }
 EXPORT_SYMBOL_GPL(tcp_get_syncookie_mss);
 
+static void tcp_authopt_conn_request(struct request_sock *req, struct sock *sk)
+{
+#if IS_ENABLED(CONFIG_TCP_AUTHOPT)
+	u8 rnextkeyid;
+	struct tcp_authopt_info *info;
+
+	if (!tcp_authopt_needed)
+		return;
+
+	rcu_read_lock();
+	info = rcu_dereference(tcp_sk(sk)->authopt_info);
+	if (!info) {
+		rcu_read_unlock();
+		return;
+	}
+
+	if (__tcp_authopt_select_key(sk, info, req_to_sk(req), &rnextkeyid, true))
+		tcp_rsk(req)->authopt_active = 1;
+	else
+		tcp_rsk(req)->authopt_active = 0;
+	rcu_read_unlock();
+#endif
+}
+
 int tcp_conn_request(struct request_sock_ops *rsk_ops,
 		     const struct tcp_request_sock_ops *af_ops,
 		     struct sock *sk, struct sk_buff *skb)
@@ -6927,10 +6951,6 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	if (IS_ENABLED(CONFIG_SMC) && want_cookie)
 		tmp_opt.smc_ok = 0;
 
-#if IS_ENABLED(CONFIG_TCP_AUTHOPT)
-	tcp_rsk(req)->recv_rnextkeyid = tmp_opt.rnextkeyid;
-#endif
-
 	tmp_opt.tstamp_ok = tmp_opt.saw_tstamp;
 	tcp_openreq_init(req, &tmp_opt, skb, sk);
 	inet_rsk(req)->no_srccheck = inet_sk(sk)->transparent;
@@ -6941,6 +6961,11 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	dst = af_ops->route_req(sk, skb, &fl, req);
 	if (!dst)
 		goto drop_and_free;
+
+#if IS_ENABLED(CONFIG_TCP_AUTHOPT)
+	tcp_rsk(req)->recv_rnextkeyid = tmp_opt.rnextkeyid;
+	tcp_authopt_conn_request(req, sk);
+#endif
 
 	if (tmp_opt.tstamp_ok)
 		tcp_rsk(req)->ts_off = af_ops->init_ts_off(net, skb);

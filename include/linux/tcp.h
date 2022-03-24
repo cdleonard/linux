@@ -140,6 +140,7 @@ struct tcp_request_sock {
 	u8				syn_tos;
 #if IS_ENABLED(CONFIG_TCP_AUTHOPT)
 	u8				recv_rnextkeyid;
+	u8				authopt_active : 1;
 #endif
 };
 
