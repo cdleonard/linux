@@ -627,7 +627,8 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	if (!info)
 		return -ENOENT;
 
-	opt->flags = info->flags & TCP_AUTHOPT_KNOWN_FLAGS;
+	opt->flags = info->flags & (TCP_AUTHOPT_KNOWN_FLAGS | TCP_AUTHOPT_FLAG_ACTIVE);
+
 	/* These keyids might be undefined, for example before connect.
 	 * Reporting zero is not strictly correct because there are no reserved
 	 * values.
@@ -977,6 +978,9 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	if (!new_info)
 		return -ENOMEM;
 
+	new_info->flags = old_info->flags;
+	if (tcp_rsk(req)->authopt_active)
+		new_info->flags |= TCP_AUTHOPT_FLAG_ACTIVE;
 	new_info->src_isn = tcp_rsk(req)->snt_isn;
 	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
 	/* Caller is tcp_create_openreq_child and already initializes snd_nxt/rcv_nxt */

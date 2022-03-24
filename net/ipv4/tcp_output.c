@@ -3713,6 +3713,36 @@ static void tcp_ca_dst_init(struct sock *sk, const struct dst_entry *dst)
 	rcu_read_unlock();
 }
 
+/**
+ * tcp_authopt_connect_init - Initialize TCP_AUTHOPT_FLAG_ACTIVE once on connect
+ *
+ * If we have a key configured for the destination at connect time then remember
+ * that TCP authentication needs to be valid on this socket.
+ *
+ * @sk: socket
+ */
+static void tcp_authopt_connect_init(struct sock *sk)
+{
+#ifdef CONFIG_TCP_AUTHOPT
+	u8 rnextkeyid;
+	struct tcp_authopt_info *info;
+
+	if (!tcp_authopt_needed)
+		return;
+
+	rcu_read_lock();
+	info = rcu_dereference(tcp_sk(sk)->authopt_info);
+	if (!info) {
+		rcu_read_unlock();
+		return;
+	}
+
+	if (__tcp_authopt_select_key(sk, info, sk, &rnextkeyid, true))
+		info->flags |= TCP_AUTHOPT_FLAG_ACTIVE;
+	rcu_read_unlock();
+#endif
+}
+
 /* Do all connect socket setups that can be done AF independent. */
 static void tcp_connect_init(struct sock *sk)
 {
@@ -3732,6 +3762,7 @@ static void tcp_connect_init(struct sock *sk)
 	if (tp->af_specific->md5_lookup(sk, sk))
 		tp->tcp_header_len += TCPOLEN_MD5SIG_ALIGNED;
 #endif
+	tcp_authopt_connect_init(sk);
 
 	/* If user gave his TCP_MAXSEG, record it to clamp */
 	if (tp->rx_opt.user_mss)
