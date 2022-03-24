@@ -369,6 +369,19 @@ enum tcp_authopt_flag {
 	 *	such connections.
 	 */
 	TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED = (1 << 2),
+	/**
+	 * @TCP_AUTHOPT_FLAG_ACTIVE: If authentication is active for a specific socket.
+	 *
+	 * TCP Authentication can be enabled but inactive on a socket if keys are
+	 * only configured for destinations other than the peer.
+	 *
+	 * A listen socket with authentication enabled will return other sockets
+	 * with authentication enabled on accept(). If no key is configured for the
+	 * peer of an accepted socket then authentication will be inactive.
+	 *
+	 * This flag is readonly and the value is determined at connection establishment time.
+	 */
+	TCP_AUTHOPT_FLAG_ACTIVE = (1 << 3),
 };
 
 /**

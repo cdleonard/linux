@@ -628,6 +628,12 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 		return -ENOENT;
 
 	opt->flags = info->flags & TCP_AUTHOPT_KNOWN_FLAGS;
+
+	/* We should store this */
+	if (tcp_authopt_lookup_send(sock_net_tcp_authopt(sk), sk, -1)) {
+		opt->flags |= TCP_AUTHOPT_FLAG_ACTIVE;
+	}
+
 	/* These keyids might be undefined, for example before connect.
 	 * Reporting zero is not strictly correct because there are no reserved
 	 * values.
