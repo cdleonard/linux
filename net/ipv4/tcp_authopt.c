@@ -619,10 +619,18 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	return info;
 }
 
-#define TCP_AUTHOPT_KNOWN_FLAGS ( \
+/* Flags fully controlled by user: */
+#define TCP_AUTHOPT_USER_FLAGS ( \
 	TCP_AUTHOPT_FLAG_LOCK_KEYID | \
 	TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID | \
 	TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED)
+
+/* All known flags */
+#define TCP_AUTHOPT_KNOWN_FLAGS ( \
+	TCP_AUTHOPT_FLAG_LOCK_KEYID | \
+	TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID | \
+	TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED | \
+	TCP_AUTHOPT_FLAG_ACTIVE)
 
 /* Like copy_from_sockptr except tolerate different optlen for compatibility reasons
  *
@@ -692,7 +700,7 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	if (IS_ERR(info))
 		return PTR_ERR(info);
 
-	info->flags = opt.flags & TCP_AUTHOPT_KNOWN_FLAGS;
+	info->flags = opt.flags & TCP_AUTHOPT_USER_FLAGS;
 	if (opt.flags & TCP_AUTHOPT_FLAG_LOCK_KEYID)
 		info->user_pref_send_keyid = opt.send_keyid;
 	if (opt.flags & TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID)
@@ -705,6 +713,7 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tcp_authopt_info *info;
+	bool anykey = false;
 	int err;
 
 	memset(opt, 0, sizeof(*opt));
@@ -717,7 +726,14 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	if (!info)
 		return -ENOENT;
 
-	opt->flags = info->flags & TCP_AUTHOPT_KNOWN_FLAGS;
+	opt->flags = info->flags & TCP_AUTHOPT_USER_FLAGS;
+
+	rcu_read_lock();
+	tcp_authopt_lookup_send(sock_net_tcp_authopt(sk), sk, -1, NULL, &anykey);
+	if (anykey)
+		opt->flags |= TCP_AUTHOPT_FLAG_ACTIVE;
+	rcu_read_unlock();
+
 	/* These keyids might be undefined, for example before connect.
 	 * Reporting zero is not strictly correct because there are no reserved
 	 * values.
