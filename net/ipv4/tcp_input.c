@@ -4021,6 +4021,7 @@ void tcp_parse_options(const struct net *net,
 	ptr = (const unsigned char *)(th + 1);
 	opt_rx->saw_tstamp = 0;
 	opt_rx->saw_unknown = 0;
+	opt_rx->authopt = 0;
 
 	while (length > 0) {
 		int opcode = *ptr++;
@@ -4105,6 +4106,7 @@ void tcp_parse_options(const struct net *net,
 				 * We parse rnextkeyid here so we can match it on synack
 				 */
 				opt_rx->rnextkeyid = ptr[1];
+				opt_rx->authopt = 1;
 				break;
 #endif
 			case TCPOPT_FASTOPEN:
@@ -6929,6 +6931,7 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 
 #if IS_ENABLED(CONFIG_TCP_AUTHOPT)
 	tcp_rsk(req)->recv_rnextkeyid = tmp_opt.rnextkeyid;
+	tcp_rsk(req)->authopt_active = tmp_opt.authopt;
 #endif
 
 	tmp_opt.tstamp_ok = tmp_opt.saw_tstamp;
