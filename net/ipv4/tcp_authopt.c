@@ -374,19 +374,28 @@ static bool better_key_match(struct tcp_authopt_key_info *old, struct tcp_authop
 	return false;
 }
 
+/*
+ * tcp_authopt_lookup_send - lookup key for sending
+ *
+ * @net: Per-namespace information containing keys
+ * @addr_sk: Socket used for destination address lookup
+ * @send_id: Optional send_id. If >= 0 then only return keys that match
+ * @anykey: Set to true if any keys are present for the peer
+ *
+ * If anykey is false then authentication is not required for peer.
+ *
+ * If anykey is true but no key was found then all our keys must be expired and sending should fail.
+ */
 static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_authopt *net,
 							    const struct sock *addr_sk,
-							    int send_id)
+							    int send_id,
+							    bool *anykey)
 {
 	struct tcp_authopt_key_info *result = NULL;
 	struct tcp_authopt_key_info *key;
 	int l3index = -1;
 
 	hlist_for_each_entry_rcu(key, &net->head, node, 0) {
-		if (send_id >= 0 && key->send_id != send_id)
-			continue;
-		if (key->flags & TCP_AUTHOPT_KEY_NOSEND)
-			continue;
 		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND)
 			if (!tcp_authopt_key_match_sk_addr(key, addr_sk))
 				continue;
@@ -397,6 +406,12 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_aut
 			if (l3index != key->l3index)
 				continue;
 		}
+		if (anykey)
+			*anykey = true;
+		if (key->flags & TCP_AUTHOPT_KEY_NOSEND)
+			continue;
+		if (send_id >= 0 && key->send_id != send_id)
+			continue;
 		if (better_key_match(result, key))
 			result = key;
 		else if (result)
@@ -445,10 +460,10 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 			send_id = info->send_keyid;
 		else
 			send_id = rsk->recv_rnextkeyid;
-		key = tcp_authopt_lookup_send(net, addr_sk, send_id);
+		key = tcp_authopt_lookup_send(net, addr_sk, send_id, NULL);
 		/* If no key found with specific send_id try anything else. */
 		if (!key)
-			key = tcp_authopt_lookup_send(net, addr_sk, -1);
+			key = tcp_authopt_lookup_send(net, addr_sk, -1, NULL);
 		if (key)
 			*rnextkeyid = key->recv_id;
 		return key;
@@ -473,14 +488,14 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 		int send_keyid = info->send_keyid;
 
 		if (!key || key->send_id != send_keyid)
-			new_key = tcp_authopt_lookup_send(net, addr_sk, send_keyid);
+			new_key = tcp_authopt_lookup_send(net, addr_sk, send_keyid, NULL);
 	} else {
 		if (!key || key->send_id != info->recv_rnextkeyid)
-			new_key = tcp_authopt_lookup_send(net, addr_sk, info->recv_rnextkeyid);
+			new_key = tcp_authopt_lookup_send(net, addr_sk, info->recv_rnextkeyid, NULL);
 	}
 	/* If no key found with specific send_id try anything else. */
 	if (!key && !new_key)
-		new_key = tcp_authopt_lookup_send(net, addr_sk, -1);
+		new_key = tcp_authopt_lookup_send(net, addr_sk, -1, NULL);
 
 	/* Update current key only if we hold the socket lock. */
 	if (new_key && key != new_key) {
