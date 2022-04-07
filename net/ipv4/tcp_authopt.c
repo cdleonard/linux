@@ -1008,6 +1008,7 @@ int __tcp_authopt_openreq(struct sock *newsk, const struct sock *oldsk, struct r
 	if (!new_info)
 		return -ENOMEM;
 
+	new_info->flags = old_info->flags;
 	new_info->src_isn = tcp_rsk(req)->snt_isn;
 	new_info->dst_isn = tcp_rsk(req)->rcv_isn;
 	/* Caller is tcp_create_openreq_child and already initializes snd_nxt/rcv_nxt */
