@@ -35,6 +35,7 @@
  *
  */
 
+#include "net/sock.h"
 #define pr_fmt(fmt) "TCP: " fmt
 
 #include <net/tcp.h>
@@ -1353,10 +1354,13 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 #ifdef CONFIG_TCP_AUTHOPT
 	if (opts.options & OPTION_AUTHOPT_FAIL) {
 		rcu_read_unlock();
-		//QP_PRINT_LOC("AO fail return -EINVAL\n");
-		QP_PRINT_LOC("AO fail return -ENOKEY\n");
+		QP_PRINT_LOC("OPTION_AUTHOPT_FAIL return -ENOKEY\n");
+		QP_PRINT_LOC("sk->sk_error_report=%ps\n", sk->sk_error_report);
+		QP_PRINT_LINUX_SOCK_ADDR(sk);
 		QP_DUMP_STACK();
-		//return -EINVAL;
+		sk->sk_err_soft = -ENOKEY;
+		sk->sk_err = -ENOKEY;
+		sk_error_report(sk);
 		return -ENOKEY;
 	}
 #endif

@@ -10,6 +10,7 @@
 #include <crypto/hash.h>
 #include <linux/inetdevice.h>
 #include <linux/proc_fs.h>
+#include <qp/qp.h>
 
 /* This is mainly intended to protect against local privilege escalations through
  * a rarely used feature so it is deliberately not namespaced.
@@ -466,8 +467,9 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 		if (!key)
 			key = tcp_authopt_lookup_send(net, addr_sk, -1, &anykey);
 		if (!key && anykey) {
-			((struct sock*)addr_sk)->sk_err = -EINVAL;
-			sk_error_report((struct sock*)addr_sk);
+			QP_PRINT_LOC("nokey nosend\n");
+			QP_PRINT_LINUX_SOCK_ADDR(addr_sk);
+			QP_DUMP_STACK();
 			return ERR_PTR(-EINVAL);
 		}
 		if (key)
@@ -503,9 +505,10 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 	if (!key && !new_key)
 		new_key = tcp_authopt_lookup_send(net, addr_sk, -1, &anykey);
 	if (!new_key && anykey) {
-		((struct sock*)addr_sk)->sk_err = -EINVAL;
-		sk_error_report((struct sock*)addr_sk);
-		return ERR_PTR(-EINVAL);
+		QP_PRINT_LOC("nokey nosend\n");
+		QP_PRINT_LINUX_SOCK_ADDR(addr_sk);
+		QP_DUMP_STACK();
+		return ERR_PTR(-ENOKEY);
 	}
 
 	/* Update current key only if we hold the socket lock. */
