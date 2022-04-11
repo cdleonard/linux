@@ -1353,9 +1353,11 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 #ifdef CONFIG_TCP_AUTHOPT
 	if (opts.options & OPTION_AUTHOPT_FAIL) {
 		rcu_read_unlock();
-		QP_PRINT_LOC("AO fail return -EINVAL\n");
+		//QP_PRINT_LOC("AO fail return -EINVAL\n");
+		QP_PRINT_LOC("AO fail return -ENOKEY\n");
 		QP_DUMP_STACK();
-		return -EINVAL;
+		//return -EINVAL;
+		return -ENOKEY;
 	}
 #endif
 	tcp_header_size = tcp_options_size + sizeof(struct tcphdr);
