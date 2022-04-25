@@ -557,6 +557,8 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 		else
 			pref_send_id = -1;
 		key = tcp_authopt_lookup_send(net_ao, addr_sk, pref_send_id, rnextkeyid, &anykey);
+		if (!key && anykey)
+			return ERR_PTR(-ENOKEY);
 
 		return key;
 	}
@@ -571,6 +573,8 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 
 	key = tcp_authopt_lookup_send(net_ao, addr_sk, pref_send_id, rnextkeyid, &anykey);
 
+	if (!key && anykey)
+		return ERR_PTR(-ENOKEY);
 	if (!key)
 		return NULL;
 
