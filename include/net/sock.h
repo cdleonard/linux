@@ -482,7 +482,7 @@ struct sock {
 	unsigned long	        sk_lingertime;
 	struct proto		*sk_prot_creator;
 	rwlock_t		sk_callback_lock;
-	int			sk_err,
+	u16			sk_err,
 				sk_err_soft;
 	u32			sk_ack_backlog;
 	u32			sk_max_ack_backlog;
