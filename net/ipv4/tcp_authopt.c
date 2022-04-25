@@ -441,6 +441,7 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 {
 	struct tcp_authopt_key_info *key, *new_key = NULL;
 	struct netns_tcp_authopt *net = sock_net_tcp_authopt(sk);
+	bool anykey = false;
 
 	/* Listen sockets don't refer to any specific connection so we don't try
 	 * to keep using the same key.
@@ -463,7 +464,9 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 		key = tcp_authopt_lookup_send(net, addr_sk, send_id, NULL);
 		/* If no key found with specific send_id try anything else. */
 		if (!key)
-			key = tcp_authopt_lookup_send(net, addr_sk, -1, NULL);
+			key = tcp_authopt_lookup_send(net, addr_sk, -1, &anykey);
+		if (!key && anykey)
+			return ERR_PTR(-ENOKEY);
 		if (key)
 			*rnextkeyid = key->recv_id;
 		return key;
@@ -495,7 +498,9 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 	}
 	/* If no key found with specific send_id try anything else. */
 	if (!key && !new_key)
-		new_key = tcp_authopt_lookup_send(net, addr_sk, -1, NULL);
+		new_key = tcp_authopt_lookup_send(net, addr_sk, -1, &anykey);
+	if (!new_key && anykey)
+		return ERR_PTR(-ENOKEY);
 
 	/* Update current key only if we hold the socket lock. */
 	if (new_key && key != new_key) {
