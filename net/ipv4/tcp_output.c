@@ -416,6 +416,7 @@ static inline bool tcp_urg_mode(const struct tcp_sock *tp)
 #define OPTION_MD5		BIT(2)
 #define OPTION_WSCALE		BIT(3)
 #define OPTION_AUTHOPT		BIT(4)
+#define OPTION_AUTHOPT_FAIL	BIT(5)
 #define OPTION_FAST_OPEN_COOKIE	BIT(8)
 #define OPTION_SMC		BIT(9)
 #define OPTION_MPTCP		BIT(10)
@@ -788,6 +789,10 @@ static int tcp_authopt_init_options(const struct sock *sk,
 	struct tcp_authopt_key_info *key;
 
 	key = tcp_authopt_select_key(sk, addr_sk, &opts->authopt_info, &opts->authopt_rnextkeyid);
+	if (IS_ERR(key)) {
+		opts->options |= OPTION_AUTHOPT_FAIL;
+		return TCPOLEN_AUTHOPT_OUTPUT;
+	}
 	if (key) {
 		opts->options |= OPTION_AUTHOPT;
 		opts->authopt_key = key;
@@ -1347,6 +1352,14 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 		if (tcp_skb_pcount(skb) > 1)
 			tcb->tcp_flags |= TCPHDR_PSH;
 	}
+#ifdef CONFIG_TCP_AUTHOPT
+	if (opts.options & OPTION_AUTHOPT_FAIL) {
+		rcu_read_unlock();
+		sk->sk_err = ENOKEY;
+		sk_error_report(sk);
+		return -ENOKEY;
+	}
+#endif
 	tcp_header_size = tcp_options_size + sizeof(struct tcphdr);
 
 	/* if no packet is in qdisc/device queue, then allow XPS to select
@@ -3647,6 +3660,13 @@ struct sk_buff *tcp_make_synack(const struct sock *sk, struct dst_entry *dst,
 	tcp_header_size = tcp_synack_options(sk, req, mss, skb, &opts, md5,
 					     foc, synack_type,
 					     syn_skb) + sizeof(*th);
+#ifdef CONFIG_TCP_AUTHOPT
+	if (opts.options & OPTION_AUTHOPT_FAIL) {
+		rcu_read_unlock();
+		kfree_skb(skb);
+		return NULL;
+	}
+#endif
 
 	skb_push(skb, tcp_header_size);
 	skb_reset_transport_header(skb);
