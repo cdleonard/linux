@@ -181,7 +181,7 @@ static inline void tcp_authopt_finish_connect(struct sock *sk, struct sk_buff *s
 {
 	struct tcp_authopt_info *info;
 
-	if (tcp_authopt_needed) {
+	if (skb && tcp_authopt_needed) {
 		info = rcu_dereference_protected(tcp_sk(sk)->authopt_info,
 						 lockdep_sock_is_held(sk));
 
