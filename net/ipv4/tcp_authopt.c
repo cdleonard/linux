@@ -1839,6 +1839,71 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb,
 }
 EXPORT_SYMBOL(__tcp_authopt_inbound_check);
 
+int tcp_get_authopt_repair_val(struct sock *sk, struct tcp_authopt_repair *opt)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_authopt_info *info;
+	int err;
+
+	memset(opt, 0, sizeof(*opt));
+	sock_owned_by_me(sk);
+	err = check_sysctl_tcp_authopt();
+	if (err)
+		return err;
+	if (!tp->repair)
+		return -EPERM;
+
+	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	if (!info)
+		return -ENOENT;
+
+	opt->dst_isn = info->dst_isn;
+	opt->src_isn = info->src_isn;
+	opt->rcv_sne = info->rcv_sne;
+	opt->snd_sne = info->snd_sne;
+	opt->rcv_seq = tp->rcv_nxt;
+	opt->snd_seq = tp->snd_nxt;
+
+	return 0;
+}
+
+int tcp_set_authopt_repair(struct sock *sk, sockptr_t optval, unsigned int optlen)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_authopt_info *info;
+	struct tcp_authopt_repair val;
+	int err;
+
+	err = check_sysctl_tcp_authopt();
+	if (err)
+		return err;
+
+	if (optlen != sizeof(val))
+		return -EFAULT;
+	if (copy_from_sockptr(&val, optval, sizeof(val)))
+		return -EFAULT;
+
+	/* tcp_authopt repair relies on fields that are only initialized after
+	 * tcp_connect. Doing this setsockopt before connect() can't be correct
+	 * so return an error.
+	 */
+	if (sk->sk_state != TCP_ESTABLISHED)
+		return -EPERM;
+
+	info = rcu_dereference_protected(tp->authopt_info, lockdep_sock_is_held(sk));
+	if (!info)
+		return -ENOENT;
+	if (!tp->repair)
+		return -EPERM;
+
+	info->dst_isn = val.dst_isn;
+	info->src_isn = val.src_isn;
+	info->rcv_sne = compute_sne(val.rcv_sne, val.rcv_seq, tp->rcv_nxt);
+	info->snd_sne = compute_sne(val.snd_sne, val.snd_seq, tp->snd_nxt);
+
+	return 0;
+}
+
 #ifdef CONFIG_PROC_FS
 struct tcp_authopt_iter_state {
 	struct seq_net_private p;
