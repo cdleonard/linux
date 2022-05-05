@@ -3621,6 +3621,9 @@ static int do_tcp_setsockopt(struct sock *sk, int level, int optname,
 	case TCP_AUTHOPT_KEY:
 		err = tcp_set_authopt_key(sk, optval, optlen);
 		break;
+	case TCP_REPAIR_AUTHOPT:
+		err = tcp_set_authopt_repair(sk, optval, optlen);
+		break;
 	case TCP_USER_TIMEOUT:
 		/* Cap the max time in ms TCP will retry or probe the window
 		 * before giving up and aborting (ETIMEDOUT) a connection.
@@ -4287,6 +4290,26 @@ zerocopy_rcv_out:
 		if (put_user(len, optlen))
 			return -EFAULT;
 		if (copy_to_user(optval, &info, len))
+			return -EFAULT;
+		return 0;
+	}
+	case TCP_REPAIR_AUTHOPT: {
+		struct tcp_authopt_repair val;
+		int err;
+
+		if (get_user(len, optlen))
+			return -EFAULT;
+
+		lock_sock(sk);
+		err = tcp_get_authopt_repair_val(sk, &val);
+		release_sock(sk);
+
+		if (err)
+			return err;
+		len = min_t(unsigned int, len, sizeof(val));
+		if (put_user(len, optlen))
+			return -EFAULT;
+		if (copy_to_user(optval, &val, len))
 			return -EFAULT;
 		return 0;
 	}
