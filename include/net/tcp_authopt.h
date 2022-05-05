@@ -240,6 +240,8 @@ static inline void tcp_authopt_update_snd_sne(struct tcp_sock *tp, u32 seq)
 			__tcp_authopt_update_snd_sne(tp, info, seq);
 	}
 }
+int tcp_get_authopt_repair_val(struct sock *sk, struct tcp_authopt_repair *opt);
+int tcp_set_authopt_repair(struct sock *sk, sockptr_t optval, unsigned int optlen);
 #else
 static inline int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 {
