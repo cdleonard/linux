@@ -4614,6 +4614,13 @@ int tcp_abort(struct sock *sk, int err)
 			local_bh_enable();
 			return 0;
 		}
+		if (sk->sk_state == TCP_TIME_WAIT) {
+			refcount_inc(&sk->sk_refcnt);
+			local_bh_disable();
+			inet_twsk_deschedule_put(inet_twsk(sk));
+			local_bh_enable();
+			return 0;
+		}
 		return -EOPNOTSUPP;
 	}
 
