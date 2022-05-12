@@ -25,6 +25,7 @@
 #include <net/netlink.h>
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
+#include <qp/qp.h>
 
 /*
  *	Our network namespace constructor/destructor lists
@@ -307,6 +308,7 @@ static __net_init int setup_net(struct net *net, struct user_namespace *user_ns)
 	int error = 0;
 	LIST_HEAD(net_exit_list);
 
+	QP_PRINT_LOC("net=%p\n", net);
 	refcount_set(&net->ns.count, 1);
 	ref_tracker_dir_init(&net->refcnt_tracker, 128);
 
@@ -401,6 +403,7 @@ static struct net *net_alloc(void)
 		goto out;
 
 	net = kmem_cache_zalloc(net_cachep, GFP_KERNEL);
+	QP_PRINT_LOC("net=%p\n", net);
 	if (!net)
 		goto out_free;
 
@@ -417,6 +420,7 @@ out:
 
 #ifdef CONFIG_KEYS
 out_free_2:
+	QP_PRINT_LOC("net=%p\n", net);
 	kmem_cache_free(net_cachep, net);
 	net = NULL;
 #endif
@@ -427,9 +431,11 @@ out_free:
 
 static void net_free(struct net *net)
 {
+	QP_PRINT_LOC("net=%p passive=%d\n", net, refcount_read(&net->passive));
 	if (refcount_dec_and_test(&net->passive)) {
 		kfree(rcu_access_pointer(net->gen));
 		kmem_cache_free(net_cachep, net);
+		QP_PRINT_LOC("freed net=%p\n", net);
 	}
 }
 
@@ -636,6 +642,7 @@ static DECLARE_WORK(net_cleanup_work, cleanup_net);
 
 void __put_net(struct net *net)
 {
+	QP_PRINT_LOC("net=%p\n", net);
 	ref_tracker_dir_exit(&net->refcnt_tracker);
 	/* Cleanup the network namespace in process context */
 	if (llist_add(&net->cleanup_list, &cleanup_list))

@@ -31,6 +31,7 @@
 
 #include <linux/inet_diag.h>
 #include <linux/sock_diag.h>
+#include <qp/qp.h>
 
 static const struct inet_diag_handler **inet_diag_table;
 
@@ -1038,6 +1039,9 @@ void inet_diag_dump_icsk(struct inet_hashinfo *hashinfo, struct sk_buff *skb,
 			sk_nulls_for_each(sk, node, &ilb->nulls_head) {
 				struct inet_sock *inet = inet_sk(sk);
 
+				QP_PRINT_LOC("check listen sk=%p ino=%lu sock_net=%p net=%p state=%d sport=%hu\n",
+					sk, sock_i_ino(sk), sock_net(sk), net, sk->sk_state, sk->sk_num);
+
 				if (!net_eq(sock_net(sk), net))
 					continue;
 
@@ -1056,6 +1060,9 @@ void inet_diag_dump_icsk(struct inet_hashinfo *hashinfo, struct sk_buff *skb,
 
 				if (!inet_diag_bc_sk(bc, sk))
 					goto next_listen;
+
+				QP_PRINT_LOC("yield sk=%p ino=%lu sock_net=%p net=%p state=%d sport=%hu\n",
+					sk, sock_i_ino(sk), sock_net(sk), net, sk->sk_state, sk->sk_num);
 
 				if (inet_sk_diag_fill(sk, inet_csk(sk), skb,
 						      cb, r, NLM_F_MULTI,
@@ -1101,6 +1108,17 @@ next_chunk:
 		sk_nulls_for_each(sk, node, &head->chain) {
 			int state;
 
+			QP_PRINT_LOC("check sk=%p"
+				//" ino=%ld"
+				" sk_net_refcnt=%d sock_net.count=%d"
+				" sock_net=%p *vs* net=%p"
+				" state=%d sport=%hu dport=%hu\n",
+				sk,
+				//sock_i_ino(sk),
+				sk->sk_net_refcnt, refcount_read(&sock_net(sk)->ns.count),
+				sock_net(sk), net,
+				sk->sk_state, sk->sk_num, ntohs(sk->sk_dport));
+
 			if (!net_eq(sock_net(sk), net))
 				continue;
 			if (num < s_num)
@@ -1125,6 +1143,19 @@ next_chunk:
 
 			if (!refcount_inc_not_zero(&sk->sk_refcnt))
 				goto next_normal;
+
+			QP_PRINT_LOC("yield sk=%p"
+				//" ino=%ld"
+				" sk_net_refcnt=%d sock_net.count=%d"
+				" net=%p"
+				" state=%d"
+				" sport=%hu dport=%hu\n",
+				sk,
+				//sock_i_ino(sk),
+				sk->sk_net_refcnt, refcount_read(&sock_net(sk)->ns.count),
+				net,
+				sk->sk_state,
+				sk->sk_num, ntohs(sk->sk_dport));
 
 			num_arr[accum] = num;
 			sk_arr[accum] = sk;
