@@ -561,7 +561,7 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	TCP_AUTHOPT_FLAG_REJECT_UNEXPECTED | \
 	TCP_AUTHOPT_FLAG_ACTIVE)
 
-/* Like copy_from_sockopt except tolerate different optlen for compatibility reasons
+/* Like copy_from_sockptr except tolerate different optlen for compatibility reasons
  *
  * If the src is shorter then it's from an old userspace and the rest of dst is
  * filled with zeros.
