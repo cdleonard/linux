@@ -1699,12 +1699,6 @@ tcp_md5_do_lookup(const struct sock *sk, int l3index,
 	return __tcp_md5_do_lookup(sk, l3index, addr, family);
 }
 
-enum skb_drop_reason
-tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
-		     const void *saddr, const void *daddr,
-		     int family, int dif, int sdif);
-
-
 #define tcp_twsk_md5_key(twsk)	((twsk)->tw_md5_key)
 #else
 static inline struct tcp_md5sig_key *
@@ -1736,6 +1730,21 @@ int tcp_sig_hash_skb_data(struct ahash_request *, const struct sk_buff *,
 			  unsigned int header_len);
 int tcp_md5_hash_key(struct tcp_md5sig_pool *hp,
 		     const struct tcp_md5sig_key *key);
+
+#if defined(CONFIG_TCP_MD5SIG) || defined(CONFIG_TCP_AUTHOPT)
+enum skb_drop_reason
+tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
+		     const void *saddr, const void *daddr,
+		     int family, int dif, int sdif);
+#else
+static enum skb_drop_reason
+tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
+		     const void *saddr, const void *daddr,
+		     int family, int dif, int sdif);
+{
+	return SKB_NOT_DROPPED_YET;
+}
+#endif
 
 /* From tcp_fastopen.c */
 void tcp_fastopen_cache_get(struct sock *sk, u16 *mss,
