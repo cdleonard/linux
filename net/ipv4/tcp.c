@@ -3615,6 +3615,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level, int optname,
 		err = tp->af_specific->md5_parse(sk, optname, optval, optlen);
 		break;
 #endif
+#ifdef CONFIG_TCP_AUTHOPT
 	case TCP_AUTHOPT:
 		err = tcp_set_authopt(sk, optval, optlen);
 		break;
@@ -3624,6 +3625,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level, int optname,
 	case TCP_REPAIR_AUTHOPT:
 		err = tcp_set_authopt_repair(sk, optval, optlen);
 		break;
+#endif
 	case TCP_USER_TIMEOUT:
 		/* Cap the max time in ms TCP will retry or probe the window
 		 * before giving up and aborting (ETIMEDOUT) a connection.
