@@ -4559,6 +4559,8 @@ tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
 	ret = tcp_parse_sig_options(tcp_hdr(skb), &md5, &ao);
 	if (ret)
 		return SKB_DROP_REASON_NOT_SPECIFIED;
+
+#if defined(CONFIG_TCP_AUTHOPT)
 	if (tcp_authopt_needed) {
 		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(parent_sk)->authopt_info);
 
@@ -4570,6 +4572,7 @@ tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
 	}
 	if (ret == 1)
 		return SKB_NOT_DROPPED_YET;
+#endif
 	return tcp_inbound_md5_hash(parent_sk, skb, saddr, daddr, family, dif, sdif, md5);
 }
 EXPORT_SYMBOL(tcp_inbound_sig_hash);
