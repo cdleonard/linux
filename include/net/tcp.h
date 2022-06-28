@@ -1740,10 +1740,10 @@ tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
 		     const void *saddr, const void *daddr,
 		     int family, int dif, int sdif);
 #else
-static enum skb_drop_reason
+static inline enum skb_drop_reason
 tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
 		     const void *saddr, const void *daddr,
-		     int family, int dif, int sdif);
+		     int family, int dif, int sdif)
 {
 	return SKB_NOT_DROPPED_YET;
 }
