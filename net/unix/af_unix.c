@@ -118,11 +118,15 @@
 
 #include "scm.h"
 
+spinlock_t unix_table_locks[UNIX_HASH_SIZE];
+EXPORT_SYMBOL_GPL(unix_table_locks);
+struct hlist_head unix_socket_table[UNIX_HASH_SIZE];
+EXPORT_SYMBOL_GPL(unix_socket_table);
 static atomic_long_t unix_nr_socks;
 
 /* SMP locking strategy:
- *    hash table is protected with spinlock.
- *    each socket state is protected by separate spinlock.
+ *    hash table is protected with spinlock unix_table_locks
+ *    each socket state is protected by separate spin lock.
  */
 
 static unsigned int unix_unbound_hash(struct sock *sk)
@@ -164,6 +168,9 @@ static void unix_table_double_lock(struct net *net,
 	if (hash1 > hash2)
 		swap(hash1, hash2);
 
+	spin_lock(&unix_table_locks[hash1]);
+	spin_lock_nested(&unix_table_locks[hash2], SINGLE_DEPTH_NESTING);
+
 	spin_lock(&net->unx.table.locks[hash1]);
 	spin_lock_nested(&net->unx.table.locks[hash2], SINGLE_DEPTH_NESTING);
 }
@@ -173,6 +180,9 @@ static void unix_table_double_unlock(struct net *net,
 {
 	spin_unlock(&net->unx.table.locks[hash1]);
 	spin_unlock(&net->unx.table.locks[hash2]);
+
+	spin_unlock(&unix_table_locks[hash1]);
+	spin_unlock(&unix_table_locks[hash2]);
 }
 
 #ifdef CONFIG_SECURITY_NETWORK
@@ -298,34 +308,38 @@ static void __unix_remove_socket(struct sock *sk)
 	sk_del_node_init(sk);
 }
 
-static void __unix_insert_socket(struct net *net, struct sock *sk)
+static void __unix_insert_socket(struct sock *sk)
 {
 	DEBUG_NET_WARN_ON_ONCE(!sk_unhashed(sk));
-	sk_add_node(sk, &net->unx.table.buckets[sk->sk_hash]);
+	sk_add_node(sk, &unix_socket_table[sk->sk_hash]);
 }
 
-static void __unix_set_addr_hash(struct net *net, struct sock *sk,
-				 struct unix_address *addr, unsigned int hash)
+static void __unix_set_addr_hash(struct sock *sk, struct unix_address *addr,
+				 unsigned int hash)
 {
 	__unix_remove_socket(sk);
 	smp_store_release(&unix_sk(sk)->addr, addr);
 
 	sk->sk_hash = hash;
-	__unix_insert_socket(net, sk);
+	__unix_insert_socket(sk);
 }
 
 static void unix_remove_socket(struct net *net, struct sock *sk)
 {
+	spin_lock(&unix_table_locks[sk->sk_hash]);
 	spin_lock(&net->unx.table.locks[sk->sk_hash]);
 	__unix_remove_socket(sk);
 	spin_unlock(&net->unx.table.locks[sk->sk_hash]);
+	spin_unlock(&unix_table_locks[sk->sk_hash]);
 }
 
 static void unix_insert_unbound_socket(struct net *net, struct sock *sk)
 {
+	spin_lock(&unix_table_locks[sk->sk_hash]);
 	spin_lock(&net->unx.table.locks[sk->sk_hash]);
-	__unix_insert_socket(net, sk);
+	__unix_insert_socket(sk);
 	spin_unlock(&net->unx.table.locks[sk->sk_hash]);
+	spin_unlock(&unix_table_locks[sk->sk_hash]);
 }
 
 static struct sock *__unix_find_socket_byname(struct net *net,
@@ -334,8 +348,11 @@ static struct sock *__unix_find_socket_byname(struct net *net,
 {
 	struct sock *s;
 
-	sk_for_each(s, &net->unx.table.buckets[hash]) {
+	sk_for_each(s, &unix_socket_table[hash]) {
 		struct unix_sock *u = unix_sk(s);
+
+		if (!net_eq(sock_net(s), net))
+			continue;
 
 		if (u->addr->len == len &&
 		    !memcmp(u->addr->name, sunname, len))
@@ -350,11 +367,13 @@ static inline struct sock *unix_find_socket_byname(struct net *net,
 {
 	struct sock *s;
 
+	spin_lock(&unix_table_locks[hash]);
 	spin_lock(&net->unx.table.locks[hash]);
 	s = __unix_find_socket_byname(net, sunname, len, hash);
 	if (s)
 		sock_hold(s);
 	spin_unlock(&net->unx.table.locks[hash]);
+	spin_unlock(&unix_table_locks[hash]);
 	return s;
 }
 
@@ -363,17 +382,20 @@ static struct sock *unix_find_socket_byinode(struct net *net, struct inode *i)
 	unsigned int hash = unix_bsd_hash(i);
 	struct sock *s;
 
+	spin_lock(&unix_table_locks[hash]);
 	spin_lock(&net->unx.table.locks[hash]);
-	sk_for_each(s, &net->unx.table.buckets[hash]) {
+	sk_for_each(s, &unix_socket_table[hash]) {
 		struct dentry *dentry = unix_sk(s)->path.dentry;
 
 		if (dentry && d_backing_inode(dentry) == i) {
 			sock_hold(s);
 			spin_unlock(&net->unx.table.locks[hash]);
+			spin_unlock(&unix_table_locks[hash]);
 			return s;
 		}
 	}
 	spin_unlock(&net->unx.table.locks[hash]);
+	spin_unlock(&unix_table_locks[hash]);
 	return NULL;
 }
 
@@ -1118,7 +1140,7 @@ retry:
 		goto retry;
 	}
 
-	__unix_set_addr_hash(net, sk, addr, new_hash);
+	__unix_set_addr_hash(sk, addr, new_hash);
 	unix_table_double_unlock(net, old_hash, new_hash);
 	err = 0;
 
@@ -1177,7 +1199,7 @@ static int unix_bind_bsd(struct sock *sk, struct sockaddr_un *sunaddr,
 	unix_table_double_lock(net, old_hash, new_hash);
 	u->path.mnt = mntget(parent.mnt);
 	u->path.dentry = dget(dentry);
-	__unix_set_addr_hash(net, sk, addr, new_hash);
+	__unix_set_addr_hash(sk, addr, new_hash);
 	unix_table_double_unlock(net, old_hash, new_hash);
 	mutex_unlock(&u->bindlock);
 	done_path_create(&parent, dentry);
@@ -1224,7 +1246,7 @@ static int unix_bind_abstract(struct sock *sk, struct sockaddr_un *sunaddr,
 	if (__unix_find_socket_byname(net, addr->name, addr->len, new_hash))
 		goto out_spin;
 
-	__unix_set_addr_hash(net, sk, addr, new_hash);
+	__unix_set_addr_hash(sk, addr, new_hash);
 	unix_table_double_unlock(net, old_hash, new_hash);
 	mutex_unlock(&u->bindlock);
 	return 0;
@@ -1534,9 +1556,9 @@ restart:
 	 *
 	 * The contents of *(otheru->addr) and otheru->path
 	 * are seen fully set up here, since we have found
-	 * otheru in hash under its lock.  Insertion into the
-	 * hash chain we'd found it in had been done in an
-	 * earlier critical area protected by the chain's lock,
+	 * otheru in hash under unix_table_locks.  Insertion
+	 * into the hash chain we'd found it in had been done
+	 * in an earlier critical area protected by unix_table_locks,
 	 * the same one where we'd set *(otheru->addr) contents,
 	 * as well as otheru->path and otheru->addr itself.
 	 *
@@ -3217,11 +3239,12 @@ static struct sock *unix_from_bucket(struct seq_file *seq, loff_t *pos)
 {
 	unsigned long offset = get_offset(*pos);
 	unsigned long bucket = get_bucket(*pos);
-	unsigned long count = 0;
 	struct sock *sk;
+	unsigned long count = 0;
 
-	for (sk = sk_head(&seq_file_net(seq)->unx.table.buckets[bucket]);
-	     sk; sk = sk_next(sk)) {
+	for (sk = sk_head(&unix_socket_table[bucket]); sk; sk = sk_next(sk)) {
+		if (sock_net(sk) != seq_file_net(seq))
+			continue;
 		if (++count == offset)
 			break;
 	}
@@ -3236,6 +3259,7 @@ static struct sock *unix_get_first(struct seq_file *seq, loff_t *pos)
 	struct sock *sk;
 
 	while (bucket < UNIX_HASH_SIZE) {
+		spin_lock(&unix_table_locks[bucket]);
 		spin_lock(&net->unx.table.locks[bucket]);
 
 		sk = unix_from_bucket(seq, pos);
@@ -3243,6 +3267,7 @@ static struct sock *unix_get_first(struct seq_file *seq, loff_t *pos)
 			return sk;
 
 		spin_unlock(&net->unx.table.locks[bucket]);
+		spin_unlock(&unix_table_locks[bucket]);
 
 		*pos = set_bucket_offset(++bucket, 1);
 	}
@@ -3254,13 +3279,14 @@ static struct sock *unix_get_next(struct seq_file *seq, struct sock *sk,
 				  loff_t *pos)
 {
 	unsigned long bucket = get_bucket(*pos);
+	struct net *net = seq_file_net(seq);
 
-	sk = sk_next(sk);
-	if (sk)
-		return sk;
+	for (sk = sk_next(sk); sk; sk = sk_next(sk))
+		if (sock_net(sk) == net)
+			return sk;
 
-
-	spin_unlock(&seq_file_net(seq)->unx.table.locks[bucket]);
+	spin_unlock(&net->unx.table.locks[bucket]);
+	spin_unlock(&unix_table_locks[bucket]);
 
 	*pos = set_bucket_offset(++bucket, 1);
 
@@ -3289,8 +3315,10 @@ static void unix_seq_stop(struct seq_file *seq, void *v)
 {
 	struct sock *sk = v;
 
-	if (sk)
+	if (sk) {
 		spin_unlock(&seq_file_net(seq)->unx.table.locks[sk->sk_hash]);
+		spin_unlock(&unix_table_locks[sk->sk_hash]);
+	}
 }
 
 static int unix_seq_show(struct seq_file *seq, void *v)
@@ -3315,7 +3343,7 @@ static int unix_seq_show(struct seq_file *seq, void *v)
 			(s->sk_state == TCP_ESTABLISHED ? SS_CONNECTING : SS_DISCONNECTING),
 			sock_i_ino(s));
 
-		if (u->addr) {	// under a hash table lock here
+		if (u->addr) {	// under unix_table_locks here
 			int i, len;
 			seq_putc(seq, ' ');
 
@@ -3378,6 +3406,7 @@ static int bpf_iter_unix_hold_batch(struct seq_file *seq, struct sock *start_sk)
 
 {
 	struct bpf_unix_iter_state *iter = seq->private;
+	struct net *net = seq_file_net(seq);
 	unsigned int expected = 1;
 	struct sock *sk;
 
@@ -3385,6 +3414,9 @@ static int bpf_iter_unix_hold_batch(struct seq_file *seq, struct sock *start_sk)
 	iter->batch[iter->end_sk++] = start_sk;
 
 	for (sk = sk_next(start_sk); sk; sk = sk_next(sk)) {
+		if (sock_net(sk) != net)
+			continue;
+
 		if (iter->end_sk < iter->max_sk) {
 			sock_hold(sk);
 			iter->batch[iter->end_sk++] = sk;
@@ -3393,7 +3425,8 @@ static int bpf_iter_unix_hold_batch(struct seq_file *seq, struct sock *start_sk)
 		expected++;
 	}
 
-	spin_unlock(&seq_file_net(seq)->unx.table.locks[start_sk->sk_hash]);
+	spin_unlock(&net->unx.table.locks[start_sk->sk_hash]);
+	spin_unlock(&unix_table_locks[start_sk->sk_hash]);
 
 	return expected;
 }
@@ -3682,9 +3715,12 @@ static void __init bpf_iter_register(void)
 
 static int __init af_unix_init(void)
 {
-	int rc = -1;
+	int i, rc = -1;
 
 	BUILD_BUG_ON(sizeof(struct unix_skb_parms) > sizeof_field(struct sk_buff, cb));
+
+	for (i = 0; i < UNIX_HASH_SIZE; i++)
+		spin_lock_init(&unix_table_locks[i]);
 
 	rc = proto_register(&unix_dgram_proto, 1);
 	if (rc != 0) {
