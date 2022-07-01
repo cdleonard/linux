@@ -280,6 +280,7 @@
 #include <linux/uaccess.h>
 #include <asm/ioctls.h>
 #include <net/busy_poll.h>
+#include <qp/qp.h>
 
 /* Track pending CMSGs. */
 enum {
@@ -4633,6 +4634,9 @@ int tcp_abort(struct sock *sk, int err)
 {
 	int state = inet_sk_state_load(sk);
 
+	QP_PRINT_LOC("sk=%p sk_flags=%lx%s err=%d", sk, sk->sk_flags, sock_flag(sk, SOCK_DEAD) ? " SOCK_DEAD" : "", err);
+	QP_DUMP_LINUX_SOCK_ADDR(sk);
+	QP_DUMP_STACK();
 	if (state == TCP_NEW_SYN_RECV) {
 		struct request_sock *req = inet_reqsk(sk);
 
