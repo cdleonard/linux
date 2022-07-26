@@ -62,10 +62,6 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen);
 int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key);
 int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen);
 #else
-static inline int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *key)
-{
-	return -ENOPROTOOPT;
-}
 static inline void tcp_authopt_clear(struct sock *sk)
 {
 }
