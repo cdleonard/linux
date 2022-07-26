@@ -236,6 +236,18 @@ enum skb_drop_reason {
 	 */
 	SKB_DROP_REASON_TCP_BOTHAOMD5,
 	/**
+	 * @SKB_DROP_REASON_TCP_AONOTFOUND: No AO signature and one expected.
+	 */
+	SKB_DROP_REASON_TCP_AONOTFOUND,
+	/**
+	 * @SKB_DROP_REASON_TCP_AOUNEXPECTED: AO hash and we're not expecting
+	 */
+	SKB_DROP_REASON_TCP_AOUNEXPECTED,
+	/**
+	 * @SKB_DROP_REASON_TCP_AOFAILURE: AO hash incorrect
+	 */
+	SKB_DROP_REASON_TCP_AOFAILURE,
+	/**
 	 * @SKB_DROP_REASON_MAX: the maximum of drop reason, which shouldn't be
 	 * used as a real 'reason'
 	 */
