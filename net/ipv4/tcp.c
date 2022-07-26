@@ -4666,6 +4666,23 @@ tcp_inbound_sig_hash(const struct sock *sk, const struct sk_buff *skb,
 	if (ret)
 		return ret;
 
+#if defined(CONFIG_TCP_AUTHOPT)
+	if (tcp_authopt_needed) {
+		struct tcp_authopt_info *info = rcu_dereference(tcp_sk(parent_sk)->authopt_info);
+		int aoret;
+
+		if (info) {
+			aoret = __tcp_authopt_inbound_check((struct sock *)sk,
+							    (struct sk_buff *)skb,
+							    info, ao);
+			/* Don't do MD5 lookup if AO found */
+			if (aoret == 1)
+				return SKB_NOT_DROPPED_YET;
+			if (aoret < 0)
+				return -aoret;
+		}
+	}
+#endif
 #ifdef CONFIG_TCP_MD5SIG
 	return tcp_inbound_md5_hash(parent_sk, skb, saddr, daddr, family, dif, sdif, md5);
 #else
