@@ -1773,6 +1773,8 @@ int tcp_get_authopt_repair_val(struct sock *sk, struct tcp_authopt_repair *opt)
 	err = check_sysctl_tcp_authopt();
 	if (err)
 		return err;
+	if (!tp->repair)
+		return -EPERM;
 
 	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
@@ -1806,6 +1808,8 @@ int tcp_set_authopt_repair(struct sock *sk, sockptr_t optval, unsigned int optle
 	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
 		return -ENOENT;
+	if (!tp->repair)
+		return -EPERM;
 
 	info->dst_isn = val.dst_isn;
 	info->src_isn = val.src_isn;
