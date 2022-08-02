@@ -1790,6 +1790,8 @@ int tcp_get_authopt_repair_val(struct sock *sk, struct tcp_authopt_repair *opt)
 	opt->src_isn = info->src_isn;
 	opt->rcv_sne = info->rcv_sne;
 	opt->snd_sne = info->snd_sne;
+	opt->rcv_seq = tp->rcv_nxt;
+	opt->snd_seq = tp->snd_nxt;
 
 	return 0;
 }
@@ -1819,8 +1821,8 @@ int tcp_set_authopt_repair(struct sock *sk, sockptr_t optval, unsigned int optle
 
 	info->dst_isn = val.dst_isn;
 	info->src_isn = val.src_isn;
-	info->rcv_sne = val.rcv_sne;
-	info->snd_sne = val.snd_sne;
+	info->rcv_sne = compute_sne(val.rcv_sne, val.rcv_seq, tp->rcv_nxt);
+	info->snd_sne = compute_sne(val.snd_sne, val.snd_seq, tp->snd_nxt);
 
 	return 0;
 }
