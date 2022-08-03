@@ -1775,6 +1775,12 @@ int tcp_get_authopt_repair_val(struct sock *sk, struct tcp_authopt_repair *opt)
 		return err;
 	if (!tp->repair)
 		return -EPERM;
+	/* tcp_authopt repair relies on fields that are only initialized after
+	 * tcp_connect. Doing this setsockopt before connect() can't be correct
+	 * so return an error.
+	 */
+	if (sk->sk_state != TCP_ESTABLISHED)
+		return -EPERM;
 
 	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
