@@ -326,11 +326,18 @@ static bool tcp_authopt_key_match_skb_addr(struct tcp_authopt_key_info *key,
 		return ipv6_prefix_equal(&ip6h->saddr,
 					 &key_addr->sin6_addr,
 					 key->prefixlen);
+	} else if (keyaf == AF_INET6 && iph->version == 4) {
+		struct sockaddr_in6 *key_addr = (struct sockaddr_in6 *)&key->addr;
+
+		/* handle ipv6-mapped-ipv4-addresses */
+		if (ipv6_addr_v4mapped(&key_addr->sin6_addr)) {
+			__be32 mask = inet_make_mask(key->prefixlen);
+			__be32 ipv4 = key_addr->sin6_addr.s6_addr32[3];
+
+			return (ipv4 & mask) == ipv4;
+		}
 	}
 
-	/* This actually happens with ipv6-mapped-ipv4-addresses
-	 * IPv6 listen sockets will be asked to validate ipv4 packets.
-	 */
 	return false;
 }
 
@@ -338,10 +345,6 @@ static bool tcp_authopt_key_match_sk_addr(struct tcp_authopt_key_info *key,
 					  const struct sock *addr_sk)
 {
 	u16 keyaf = key->addr.ss_family;
-
-	/* This probably can't happen even with ipv4-mapped-ipv6 */
-	if (keyaf != addr_sk->sk_family)
-		return false;
 
 	if (keyaf == AF_INET) {
 		struct sockaddr_in *key_addr = (struct sockaddr_in *)&key->addr;
@@ -355,6 +358,12 @@ static bool tcp_authopt_key_match_sk_addr(struct tcp_authopt_key_info *key,
 		return ipv6_prefix_equal(&addr_sk->sk_v6_daddr,
 					 &key_addr->sin6_addr,
 					 key->prefixlen);
+	} else if (keyaf == AF_INET6 && addr_sk->sk_family == AF_INET) {
+		struct sockaddr_in6 *key_addr = (struct sockaddr_in6 *)&key->addr;
+		__be32 mask = inet_make_mask(key->prefixlen);
+		__be32 ipv4 = key_addr->sin6_addr.s6_addr32[3];
+
+		return (addr_sk->sk_daddr & mask) == ipv4;
 #endif
 	}
 
@@ -1477,10 +1486,16 @@ static int __tcp_authopt_calc_mac(struct sock *sk,
 	struct tcp_authopt_alg_pool *mac_pool;
 	u8 traffic_key[TCP_AUTHOPT_MAX_TRAFFIC_KEY_LEN];
 	int err;
-	bool ipv6 = (sk->sk_family != AF_INET);
+	bool ipv6;
 
-	if (sk->sk_family != AF_INET && sk->sk_family != AF_INET6)
-		return -EINVAL;
+#if IS_ENABLED(CONFIG_IPV6)
+	if (input)
+		ipv6 = (skb->protocol == htons(ETH_P_IPV6));
+	else
+		ipv6 = (sk->sk_family == AF_INET6) && !ipv6_addr_v4mapped(&sk->sk_v6_daddr);
+#else
+	ipv6 = false;
+#endif
 
 	err = tcp_authopt_get_traffic_key(sk, skb, key, info, input, ipv6, traffic_key);
 	if (err)
