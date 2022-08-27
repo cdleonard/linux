@@ -244,6 +244,29 @@ void tcp_authopt_clear(struct sock *sk)
 		tcp_sk(sk)->authopt_info = NULL;
 	}
 }
+
+static bool key_valid_for_send(struct tcp_authopt_key_info *key, ktime_t now)
+{
+	if (key->flags & TCP_AUTHOPT_KEY_NOSEND)
+		return false;
+	if (key->flags & TCP_AUTHOPT_KEY_SEND_LIFETIME_BEGIN && now < key->send_lifetime_begin)
+		return false;
+	if (key->flags & TCP_AUTHOPT_KEY_SEND_LIFETIME_END && now > key->send_lifetime_end)
+		return false;
+	return true;
+}
+
+static bool key_valid_for_recv(struct tcp_authopt_key_info *key, ktime_t now)
+{
+	if (key->flags & TCP_AUTHOPT_KEY_NORECV)
+		return false;
+	if (key->flags & TCP_AUTHOPT_KEY_RECV_LIFETIME_BEGIN && now < key->recv_lifetime_begin)
+		return false;
+	if (key->flags & TCP_AUTHOPT_KEY_RECV_LIFETIME_END && now > key->recv_lifetime_end)
+		return false;
+	return true;
+}
+
 /* checks that ipv4 or ipv6 addr matches. */
 static bool ipvx_addr_match(struct sockaddr_storage *a1,
 			    struct sockaddr_storage *a2)
@@ -386,6 +409,7 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_aut
 {
 	struct tcp_authopt_key_info *result = NULL;
 	struct tcp_authopt_key_info *key;
+	time64_t now = ktime_get_real_seconds();
 	int l3index = -1;
 
 	hlist_for_each_entry_rcu(key, &net->head, node, 0) {
@@ -399,7 +423,7 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_aut
 			if (l3index != key->l3index)
 				continue;
 		}
-		if (key->flags & TCP_AUTHOPT_KEY_NOSEND)
+		if (!key_valid_for_send(key, now))
 			continue;
 		if (better_key_match(result, key))
 			result = key;
@@ -557,7 +581,11 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	TCP_AUTHOPT_KEY_IFINDEX | \
 	TCP_AUTHOPT_KEY_PREFIXLEN | \
 	TCP_AUTHOPT_KEY_NOSEND | \
-	TCP_AUTHOPT_KEY_NORECV)
+	TCP_AUTHOPT_KEY_NORECV | \
+	TCP_AUTHOPT_KEY_SEND_LIFETIME_BEGIN | \
+	TCP_AUTHOPT_KEY_SEND_LIFETIME_END | \
+	TCP_AUTHOPT_KEY_RECV_LIFETIME_BEGIN | \
+	TCP_AUTHOPT_KEY_RECV_LIFETIME_END)
 
 static bool ipv6_addr_is_prefix(struct in6_addr *addr, int plen)
 {
@@ -692,6 +720,10 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	memcpy(&key_info->addr, &opt.addr, sizeof(key_info->addr));
 	key_info->l3index = l3index;
 	key_info->prefixlen = prefixlen;
+	key_info->send_lifetime_begin = opt.send_lifetime_begin;
+	key_info->send_lifetime_end = opt.send_lifetime_end;
+	key_info->recv_lifetime_begin = opt.recv_lifetime_begin;
+	key_info->recv_lifetime_end = opt.recv_lifetime_end;
 	hlist_add_head_rcu(&key_info->node, &net->head);
 	mutex_unlock(&net->mutex);
 
@@ -1482,6 +1514,7 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 	struct tcp_authopt_key_info *result = NULL;
 	struct tcp_authopt_key_info *key;
 	int l3index = -1;
+	time64_t now = ktime_get_real_seconds();
 
 	*anykey = false;
 	/* multiple matches will cause occasional failures */
@@ -1506,7 +1539,7 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 		}
 		*anykey = true;
 		// If only keys with norecv flag are present still consider that
-		if (key->flags & TCP_AUTHOPT_KEY_NORECV)
+		if (!key_valid_for_recv(key, now))
 			continue;
 		if (recv_id >= 0 && key->recv_id != recv_id)
 			continue;
