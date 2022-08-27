@@ -55,6 +55,15 @@ struct tcp_authopt_key_info {
 	struct sockaddr_storage addr;
 	/** @alg: Algorithm implementation matching alg_id */
 	struct tcp_authopt_alg_imp *alg;
+	/** @alg: Algorithm implementation matching alg_id */
+	/** @send_lifetime_begin: Beginning of send lifetime */
+	u64 send_lifetime_begin;
+	/** @send_lifetime_end: End of send lifetime */
+	u64 send_lifetime_end;
+	/** @recv_lifetime_begin: Beginning of recv lifetime */
+	u64 recv_lifetime_begin;
+	/** @recv_lifetime_end: End of recv lifetime */
+	u64 recv_lifetime_end;
 };
 
 /**
