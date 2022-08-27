@@ -406,6 +406,36 @@ static bool better_key_match(struct tcp_authopt_key_info *old, struct tcp_authop
 	return false;
 }
 
+static bool better_key_match_for_send(struct tcp_authopt_key_info *old, struct tcp_authopt_key_info *new)
+{
+	if (better_key_match(old, new))
+		return true;
+	/* For keys with expiration dates prefer the one with longest lifetime */
+	if (old->flags & TCP_AUTHOPT_KEY_SEND_LIFETIME_END &&
+		new->flags & TCP_AUTHOPT_KEY_SEND_LIFETIME_END &&
+		new->send_lifetime_end > old->send_lifetime_end)
+		return true;
+	/* Break ties by numeric ID */
+	if (new->send_id < old->send_id)
+		return true;
+	return false;
+}
+
+static bool better_key_match_for_recv(struct tcp_authopt_key_info *old, struct tcp_authopt_key_info *new)
+{
+	if (better_key_match(old, new))
+		return true;
+	/* For keys with expiration dates prefer the one with longest lifetime */
+	if (old->flags & TCP_AUTHOPT_KEY_RECV_LIFETIME_END &&
+		new->flags & TCP_AUTHOPT_KEY_RECV_LIFETIME_END &&
+		new->recv_lifetime_end > old->recv_lifetime_end)
+		return true;
+	/* Break ties by numeric ID */
+	if (new->recv_id < old->recv_id)
+		return true;
+	return false;
+}
+
 /**
  * tcp_authopt_lookup_send - lookup key for sending
  *
@@ -445,13 +475,47 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_aut
 			continue;
 		if (send_id >= 0 && key->send_id != send_id)
 			continue;
-		if (better_key_match(result, key))
+		if (better_key_match_for_send(result, key))
 			result = key;
 		else if (result)
 			net_warn_ratelimited("ambiguous tcp authentication keys configured for send\n");
 	}
 
 	return result;
+}
+
+/**
+ * tcp_authopt_select_rnextkeyid - pick rnextkeyid
+ *
+ * @net: Per-namespace information containing keys
+ * @addr_sk: Socket used for destination address lookup
+ */
+static int tcp_authopt_select_rnextkeyid(struct netns_tcp_authopt *net,
+					 const struct sock *addr_sk)
+{
+	struct tcp_authopt_key_info *result = NULL;
+	struct tcp_authopt_key_info *key;
+	time64_t now = ktime_get_real_seconds();
+	int l3index = -1;
+
+	hlist_for_each_entry_rcu(key, &net->head, node, 0) {
+		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND)
+			if (!tcp_authopt_key_match_sk_addr(key, addr_sk))
+				continue;
+		if (key->flags & TCP_AUTHOPT_KEY_IFINDEX) {
+			if (l3index < 0)
+				l3index = l3mdev_master_ifindex_by_index(sock_net(addr_sk),
+									 addr_sk->sk_bound_dev_if);
+			if (l3index != key->l3index)
+				continue;
+		}
+		if (!key_valid_for_recv(key, now))
+			continue;
+		if (better_key_match_for_recv(result, key))
+			result = key;
+	}
+
+	return result ? result->recv_id : -1;
 }
 
 /**
@@ -557,7 +621,7 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 		if (info->flags & TCP_AUTHOPT_FLAG_LOCK_RNEXTKEYID)
 			*rnextkeyid = info->send_rnextkeyid;
 		else
-			*rnextkeyid = info->send_rnextkeyid = key->recv_id;
+			*rnextkeyid = info->send_rnextkeyid = tcp_authopt_select_rnextkeyid(net, addr_sk);
 	}
 
 	return key;
