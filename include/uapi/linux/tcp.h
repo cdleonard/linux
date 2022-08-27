@@ -420,7 +420,11 @@ struct tcp_authopt {
  * @TCP_AUTHOPT_KEY_NOSEND: Key invalid for send (expired)
  * @TCP_AUTHOPT_KEY_NORECV: Key invalid for recv (expired)
  * @TCP_AUTHOPT_KEY_PREFIXLEN: Valid value in `tcp_authopt.prefixlen`, otherwise
- * match full address length
+ * always match full address length
+ * @TCP_AUTHOPT_KEY_SEND_LIFETIME_BEGIN: Valid value in `tcp_authopt.send_lifetime_begin`
+ * @TCP_AUTHOPT_KEY_SEND_LIFETIME_END: Valid value in `tcp_authopt.send_lifetime_end`
+ * @TCP_AUTHOPT_KEY_RECV_LIFETIME_BEGIN: Valid value in `tcp_authopt.recv_lifetime_begin`
+ * @TCP_AUTHOPT_KEY_RECV_LIFETIME_END: Valid value in `tcp_authopt.recv_lifetime_end`
  */
 enum tcp_authopt_key_flag {
 	TCP_AUTHOPT_KEY_DEL = (1 << 0),
@@ -430,6 +434,10 @@ enum tcp_authopt_key_flag {
 	TCP_AUTHOPT_KEY_NOSEND = (1 << 4),
 	TCP_AUTHOPT_KEY_NORECV = (1 << 5),
 	TCP_AUTHOPT_KEY_PREFIXLEN = (1 << 6),
+	TCP_AUTHOPT_KEY_SEND_LIFETIME_BEGIN = (1 << 7),
+	TCP_AUTHOPT_KEY_SEND_LIFETIME_END = (1 << 8),
+	TCP_AUTHOPT_KEY_RECV_LIFETIME_BEGIN = (1 << 9),
+	TCP_AUTHOPT_KEY_RECV_LIFETIME_END = (1 << 10),
 };
 
 /**
@@ -455,6 +463,9 @@ enum tcp_authopt_alg {
  *
  * RFC5925 requires that key ids must not overlap for the same TCP connection.
  * This is not enforced by linux.
+ *
+ * Key validity times are optional. When specified they are interpreted as "wall
+ * time" and compared to CLOCK_REALTIME.
  */
 struct tcp_authopt_key {
 	/** @flags: Combination of &enum tcp_authopt_key_flag */
@@ -491,6 +502,14 @@ struct tcp_authopt_key {
 	 * address match is performed.
 	 */
 	int	prefixlen;
+	/** @send_lifetime_begin: Beginning of send lifetime */
+	__u64	send_lifetime_begin;
+	/** @send_lifetime_end: End of send lifetime */
+	__u64	send_lifetime_end;
+	/** @recv_lifetime_begin: Beginning of recv lifetime */
+	__u64	recv_lifetime_begin;
+	/** @recv_lifetime_end: End of recv lifetime */
+	__u64	recv_lifetime_end;
 };
 
 /**
