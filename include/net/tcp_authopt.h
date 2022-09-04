@@ -136,8 +136,7 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(
 		const struct sock *sk,
 		struct tcp_authopt_info *info,
 		const struct sock *addr_sk,
-		u8 *rnextkeyid,
-		bool locked);
+		u8 *rnextkeyid);
 static inline struct tcp_authopt_key_info *tcp_authopt_select_key(
 		const struct sock *sk,
 		const struct sock *addr_sk,
@@ -148,7 +147,7 @@ static inline struct tcp_authopt_key_info *tcp_authopt_select_key(
 		*info = rcu_dereference(tcp_sk(sk)->authopt_info);
 
 		if (*info)
-			return __tcp_authopt_select_key(sk, *info, addr_sk, rnextkeyid, true);
+			return __tcp_authopt_select_key(sk, *info, addr_sk, rnextkeyid);
 	}
 	return NULL;
 }

@@ -531,7 +531,6 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_aut
  * @info: socket's tcp_authopt_info
  * @addr_sk: socket used for address lookup. Same as sk except for synack case
  * @rnextkeyid: value of rnextkeyid caller should write in packet
- * @locked: If we're holding the socket lock. This is false for some timewait and reset cases
  *
  * Result is protected by RCU and can't be stored, it may only be passed to
  * tcp_authopt_hash and only under a single rcu_read_lock.
@@ -542,8 +541,7 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_aut
 struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 						      struct tcp_authopt_info *info,
 						      const struct sock *addr_sk,
-						      u8 *rnextkeyid,
-						      bool locked)
+						      u8 *rnextkeyid)
 {
 	struct tcp_authopt_key_info *key;
 	struct netns_tcp_authopt *net = sock_net_tcp_authopt(sk);
@@ -571,10 +569,6 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 		if (!key && anykey)
 			return ERR_PTR(-ENOKEY);
 		return key;
-	}
-
-	if (locked) {
-		sock_owned_by_me(sk);
 	}
 
 	/* Try to keep the same sending key unless user or peer requires a different key
