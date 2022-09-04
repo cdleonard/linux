@@ -54,22 +54,29 @@ the last send packet and about the keyid/rnextkeyd in the last valid received
 packet.
 
 By default the sending keyid is selected to match the rnextkeyid value sent by
-the remote side. If that keyid is not available (or for new connections) a
-random matching key is selected.
+the remote side, visible as recv_rnextkeyid in getsockopt. If that keyid is not
+available then the valid key with the longest send validity time is used, and
+otherwise ties are broken by preferring lowest numeric send_id.
 
 If the ``TCP_AUTHOPT_LOCK_KEYID`` flag is set then the sending key is selected
 by the `tcp_authopt.send_local_id` field and recv_rnextkeyid is ignored. If no
-key with local_id == send_local_id is configured then a random matching key is
-selected.
+key with local_id == send_local_id is valid then the same default is used
+as for missing recv_rnextkeyid.
 
-The current sending key is cached in the socket and will not change unless
-requested by remote rnextkeyid or by setsockopt.
+The rnextkeyid value sent on the wire is the recv_id of the valid key with the
+longest recv validity time, and otherwise ties are broken by preferring lowest
+numeric recv_id.
 
-The rnextkeyid value sent on the wire is usually the recv_id of the current
-key used for sending. If the TCP_AUTHOPT_LOCK_RNEXTKEY flag is set in
-`tcp_authopt.flags` the value of `tcp_authopt.send_rnextkeyid` is send
-instead.  This can be used to implement smooth rollover: the peer will switch
-its keyid to the received rnextkeyid when it is available.
+If the TCP_AUTHOPT_LOCK_RNEXTKEY flag is set in `tcp_authopt.flags` the value of
+`tcp_authopt.send_rnextkeyid` is sent instead.
+
+The default key selection behavior is designed to implement key rollover in a
+way that is compatible with existing vendors without needing userspace key
+management. It also tries to behave predictably in all scenarios therefore it
+breaks ties by numeric IDs.
+
+An userspace daemon can use the "lock" flags to implement different key
+management and key rotation policies.
 
 Proc interface
 --------------
