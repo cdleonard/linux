@@ -1751,6 +1751,21 @@ static void print_tcpao_notice(const char *msg, struct sk_buff *skb)
 	}
 }
 
+static void save_inbound_key_info(
+		struct tcp_authopt_info *info,
+		struct tcphdr_authopt *opt)
+{
+	/* Doing this for all valid packets will results in keyids temporarily
+	 * flipping back and forth if packets are reordered or retransmitted
+	 * but keys should eventually stabilize.
+	 *
+	 * This is connection-specific so don't store for listen sockets.
+	 *
+	 */
+	info->recv_keyid = opt->keyid;
+	info->recv_rnextkeyid = opt->rnextkeyid;
+}
+
 /**
  * __tcp_authopt_inbound_check - Check inbound TCP authentication option
  *
@@ -1797,7 +1812,8 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb,
 			return -SKB_DROP_REASON_TCP_AOUNEXPECTED;
 		}
 		print_tcpao_notice("TCP Authentication Unexpected: Accepted", skb);
-		goto accept;
+		save_inbound_key_info(info, opt);
+		return 0;
 	}
 	if (opt && !key) {
 		/* Keys are configured for peer but with different keyid than packet */
@@ -1820,21 +1836,7 @@ int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb,
 		return -SKB_DROP_REASON_TCP_AOFAILURE;
 	}
 
-accept:
-	/* Doing this for all valid packets will results in keyids temporarily
-	 * flipping back and forth if packets are reordered or retransmitted
-	 * but keys should eventually stabilize.
-	 *
-	 * This is connection-specific so don't store for listen sockets.
-	 *
-	 * We could store rnextkeyid from SYN in a request sock and use it for
-	 * the SYNACK but we don't.
-	 */
-	if (sk->sk_state != TCP_LISTEN) {
-		info->recv_keyid = opt->keyid;
-		info->recv_rnextkeyid = opt->rnextkeyid;
-	}
-
+	save_inbound_key_info(info, opt);
 	return 1;
 }
 EXPORT_SYMBOL(__tcp_authopt_inbound_check);
