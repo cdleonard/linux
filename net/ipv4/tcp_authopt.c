@@ -217,10 +217,10 @@ static void tcp_authopt_key_put(struct tcp_authopt_key_info *key)
 		kref_put(&key->ref, tcp_authopt_key_release_kref);
 }
 
-static void tcp_authopt_key_del(struct netns_tcp_authopt *net,
+static void tcp_authopt_key_del(struct netns_tcp_authopt *net_ao,
 				struct tcp_authopt_key_info *key)
 {
-	lockdep_assert_held(&net->mutex);
+	lockdep_assert_held(&net_ao->mutex);
 	hlist_del_rcu(&key->node);
 	key->flags |= TCP_AUTHOPT_KEY_DEL;
 	kref_put(&key->ref, tcp_authopt_key_release_kref);
@@ -372,12 +372,12 @@ static bool tcp_authopt_key_match_sk_addr(struct tcp_authopt_key_info *key,
 }
 
 static struct tcp_authopt_key_info *tcp_authopt_key_lookup_exact(const struct sock *sk,
-								 struct netns_tcp_authopt *net,
+								 struct netns_tcp_authopt *net_ao,
 								 struct tcp_authopt_key *ukey)
 {
 	struct tcp_authopt_key_info *key_info;
 
-	hlist_for_each_entry_rcu(key_info, &net->head, node, lockdep_is_held(&net->mutex))
+	hlist_for_each_entry_rcu(key_info, &net_ao->head, node, lockdep_is_held(&net_ao->mutex))
 		if (tcp_authopt_key_match_exact(key_info, ukey))
 			return key_info;
 
@@ -471,7 +471,7 @@ static int better_rnextkey(struct tcp_authopt_key_info *old, struct tcp_authopt_
  *
  * If anykey is true but no key was found then all our keys must be expired and sending should fail.
  */
-static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_authopt *net,
+static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_authopt *net_ao,
 							    const struct sock *addr_sk,
 							    int pref_send_id,
 							    u8 *rnextkeyid,
@@ -483,7 +483,7 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_send(struct netns_tcp_aut
 	time64_t now = ktime_get_real_seconds();
 	int l3index = -1;
 
-	hlist_for_each_entry_rcu(key, &net->head, node, 0) {
+	hlist_for_each_entry_rcu(key, &net_ao->head, node, 0) {
 		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND)
 			if (!tcp_authopt_key_match_sk_addr(key, addr_sk))
 				continue;
@@ -544,7 +544,7 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 						      u8 *rnextkeyid)
 {
 	struct tcp_authopt_key_info *key;
-	struct netns_tcp_authopt *net = sock_net_tcp_authopt(sk);
+	struct netns_tcp_authopt *net_ao = sock_net_tcp_authopt(sk);
 	bool anykey = false;
 	int pref_send_id;
 
@@ -565,7 +565,7 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 			pref_send_id = info->user_pref_send_keyid;
 		else
 			pref_send_id = rsk->recv_rnextkeyid;
-		key = tcp_authopt_lookup_send(net, addr_sk, pref_send_id, rnextkeyid, &anykey);
+		key = tcp_authopt_lookup_send(net_ao, addr_sk, pref_send_id, rnextkeyid, &anykey);
 		if (!key && anykey)
 			return ERR_PTR(-ENOKEY);
 		return key;
@@ -579,7 +579,7 @@ struct tcp_authopt_key_info *__tcp_authopt_select_key(const struct sock *sk,
 	else
 		pref_send_id = info->recv_rnextkeyid;
 
-	key = tcp_authopt_lookup_send(net, addr_sk, pref_send_id, rnextkeyid, &anykey);
+	key = tcp_authopt_lookup_send(net_ao, addr_sk, pref_send_id, rnextkeyid, &anykey);
 
 	if (!key && anykey)
 		return ERR_PTR(-ENOKEY);
@@ -773,7 +773,7 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	struct tcp_authopt_key opt;
 	struct tcp_authopt_info *info;
 	struct tcp_authopt_key_info *key_info, *old_key_info;
-	struct netns_tcp_authopt *net = sock_net_tcp_authopt(sk);
+	struct netns_tcp_authopt *net_ao = sock_net_tcp_authopt(sk);
 	struct tcp_authopt_alg_imp *alg;
 	int l3index = 0;
 	int prefixlen;
@@ -798,15 +798,15 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 
 	/* Delete is a special case: */
 	if (opt.flags & TCP_AUTHOPT_KEY_DEL) {
-		mutex_lock(&net->mutex);
-		key_info = tcp_authopt_key_lookup_exact(sk, net, &opt);
+		mutex_lock(&net_ao->mutex);
+		key_info = tcp_authopt_key_lookup_exact(sk, net_ao, &opt);
 		if (key_info) {
-			tcp_authopt_key_del(net, key_info);
+			tcp_authopt_key_del(net_ao, key_info);
 			err = 0;
 		} else {
 			err = -ENOENT;
 		}
-		mutex_unlock(&net->mutex);
+		mutex_unlock(&net_ao->mutex);
 		return err;
 	}
 
@@ -874,14 +874,14 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	key_info = kmalloc(sizeof(*key_info), GFP_KERNEL | __GFP_ZERO);
 	if (!key_info)
 		return -ENOMEM;
-	mutex_lock(&net->mutex);
+	mutex_lock(&net_ao->mutex);
 	kref_init(&key_info->ref);
 	/* If an old key exists with exact ID then remove and replace.
 	 * RCU-protected readers might observe both and pick any.
 	 */
-	old_key_info = tcp_authopt_key_lookup_exact(sk, net, &opt);
+	old_key_info = tcp_authopt_key_lookup_exact(sk, net_ao, &opt);
 	if (old_key_info)
-		tcp_authopt_key_del(net, old_key_info);
+		tcp_authopt_key_del(net_ao, old_key_info);
 	key_info->flags = opt.flags & TCP_AUTHOPT_KEY_KNOWN_FLAGS;
 	key_info->send_id = opt.send_id;
 	key_info->recv_id = opt.recv_id;
@@ -896,8 +896,8 @@ int tcp_set_authopt_key(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	key_info->send_lifetime_end = opt.send_lifetime_end;
 	key_info->recv_lifetime_begin = opt.recv_lifetime_begin;
 	key_info->recv_lifetime_end = opt.recv_lifetime_end;
-	hlist_add_head_rcu(&key_info->node, &net->head);
-	mutex_unlock(&net->mutex);
+	hlist_add_head_rcu(&key_info->node, &net_ao->head);
+	mutex_unlock(&net_ao->mutex);
 
 	return 0;
 }
@@ -1685,7 +1685,7 @@ out_err_traffic_key:
  */
 static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 							    struct sk_buff *skb,
-							    struct netns_tcp_authopt *net,
+							    struct netns_tcp_authopt *net_ao,
 							    int recv_id,
 							    bool *anykey)
 {
@@ -1696,7 +1696,7 @@ static struct tcp_authopt_key_info *tcp_authopt_lookup_recv(struct sock *sk,
 
 	*anykey = false;
 	/* multiple matches will cause occasional failures */
-	hlist_for_each_entry_rcu(key, &net->head, node, 0) {
+	hlist_for_each_entry_rcu(key, &net_ao->head, node, 0) {
 		if (key->flags & TCP_AUTHOPT_KEY_ADDR_BIND &&
 		    !tcp_authopt_key_match_skb_addr(key, skb))
 			continue;
@@ -1782,14 +1782,14 @@ static void save_inbound_key_info(
 int __tcp_authopt_inbound_check(struct sock *sk, struct sk_buff *skb,
 				struct tcp_authopt_info *info, const u8 *_opt)
 {
-	struct netns_tcp_authopt *net = sock_net_tcp_authopt(sk);
+	struct netns_tcp_authopt *net_ao = sock_net_tcp_authopt(sk);
 	struct tcphdr_authopt *opt = (struct tcphdr_authopt *)_opt;
 	struct tcp_authopt_key_info *key;
 	bool anykey;
 	u8 macbuf[TCP_AUTHOPT_MAXMACBUF];
 	int err;
 
-	key = tcp_authopt_lookup_recv(sk, skb, net, opt ? opt->keyid : -1, &anykey);
+	key = tcp_authopt_lookup_recv(sk, skb, net_ao, opt ? opt->keyid : -1, &anykey);
 
 	/* nothing found or expected */
 	if (!opt && !anykey)
@@ -1912,12 +1912,12 @@ struct tcp_authopt_iter_state {
 	struct seq_net_private p;
 };
 
-static struct tcp_authopt_key_info *tcp_authopt_get_key_index(struct netns_tcp_authopt *net,
+static struct tcp_authopt_key_info *tcp_authopt_get_key_index(struct netns_tcp_authopt *net_ao,
 							      int index)
 {
 	struct tcp_authopt_key_info *key;
 
-	hlist_for_each_entry(key, &net->head, node) {
+	hlist_for_each_entry(key, &net_ao->head, node) {
 		if (--index < 0)
 			return key;
 	}
@@ -1928,13 +1928,13 @@ static struct tcp_authopt_key_info *tcp_authopt_get_key_index(struct netns_tcp_a
 static void *tcp_authopt_seq_start(struct seq_file *seq, loff_t *pos)
 	__acquires(RCU)
 {
-	struct netns_tcp_authopt *net = &seq_file_net(seq)->tcp_authopt;
+	struct netns_tcp_authopt *net_ao = &seq_file_net(seq)->tcp_authopt;
 
 	rcu_read_lock();
 	if (*pos == 0)
 		return SEQ_START_TOKEN;
 	else
-		return tcp_authopt_get_key_index(net, *pos - 1);
+		return tcp_authopt_get_key_index(net_ao, *pos - 1);
 }
 
 static void tcp_authopt_seq_stop(struct seq_file *seq, void *v)
@@ -1945,10 +1945,10 @@ static void tcp_authopt_seq_stop(struct seq_file *seq, void *v)
 
 static void *tcp_authopt_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
-	struct netns_tcp_authopt *net = &seq_file_net(seq)->tcp_authopt;
+	struct netns_tcp_authopt *net_ao = &seq_file_net(seq)->tcp_authopt;
 	void *ret;
 
-	ret = tcp_authopt_get_key_index(net, *pos);
+	ret = tcp_authopt_get_key_index(net_ao, *pos);
 	++*pos;
 
 	return ret;
@@ -2005,31 +2005,31 @@ static void __net_exit tcp_authopt_proc_exit_net(struct net *net)
 	remove_proc_entry("tcp_authopt", net->proc_net);
 }
 
-static int tcp_authopt_init_net(struct net *full_net)
+static int tcp_authopt_init_net(struct net *net)
 {
-	struct netns_tcp_authopt *net = &full_net->tcp_authopt;
+	struct netns_tcp_authopt *net_ao = &net->tcp_authopt;
 
-	mutex_init(&net->mutex);
-	INIT_HLIST_HEAD(&net->head);
+	mutex_init(&net_ao->mutex);
+	INIT_HLIST_HEAD(&net_ao->head);
 
-	return tcp_authopt_proc_init_net(full_net);
+	return tcp_authopt_proc_init_net(net);
 }
 
-static void tcp_authopt_exit_net(struct net *full_net)
+static void tcp_authopt_exit_net(struct net *net)
 {
-	struct netns_tcp_authopt *net = &full_net->tcp_authopt;
+	struct netns_tcp_authopt *net_ao = &net->tcp_authopt;
 	struct tcp_authopt_key_info *key;
 	struct hlist_node *n;
 
-	tcp_authopt_proc_exit_net(full_net);
-	mutex_lock(&net->mutex);
+	tcp_authopt_proc_exit_net(net);
+	mutex_lock(&net_ao->mutex);
 
-	hlist_for_each_entry_safe(key, n, &net->head, node) {
+	hlist_for_each_entry_safe(key, n, &net_ao->head, node) {
 		hlist_del_rcu(&key->node);
 		tcp_authopt_key_put(key);
 	}
 
-	mutex_unlock(&net->mutex);
+	mutex_unlock(&net_ao->mutex);
 }
 
 static struct pernet_operations net_ops = {
