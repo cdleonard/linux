@@ -241,8 +241,8 @@ void tcp_authopt_clear(struct sock *sk)
 
 	info = rcu_dereference_protected(tcp_sk(sk)->authopt_info, lockdep_sock_is_held(sk));
 	if (info) {
-		tcp_authopt_free(sk, info);
 		tcp_sk(sk)->authopt_info = NULL;
+		tcp_authopt_free(sk, info);
 	}
 }
 
