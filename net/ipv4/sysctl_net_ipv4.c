@@ -434,11 +434,12 @@ static int proc_tcp_authopt(struct ctl_table *ctl,
 	err = proc_dointvec_minmax(&tmp, write, buffer, lenp, ppos);
 	if (err)
 		return err;
-	if (sysctl_tcp_authopt && !val) {
+	if (val)
+		WRITE_ONCE(sysctl_tcp_authopt, 1);
+	else if (READ_ONCE(val)) {
 		net_warn_ratelimited("Enabling TCP Authentication Option is permanent\n");
 		return -EINVAL;
 	}
-	sysctl_tcp_authopt = val;
 	return 0;
 }
 #endif

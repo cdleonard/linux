@@ -670,7 +670,7 @@ static int _copy_from_sockptr_tolerant(u8 *dst,
 
 static int check_sysctl_tcp_authopt(void)
 {
-	if (!sysctl_tcp_authopt) {
+	if (!READ_ONCE(sysctl_tcp_authopt)) {
 		net_warn_ratelimited("TCP Authentication Option disabled by sysctl.\n");
 		return -EPERM;
 	}
