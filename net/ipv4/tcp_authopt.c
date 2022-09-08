@@ -684,7 +684,6 @@ int tcp_set_authopt(struct sock *sk, sockptr_t optval, unsigned int optlen)
 	struct tcp_authopt_info *info;
 	int err;
 
-	sock_owned_by_me(sk);
 	err = check_sysctl_tcp_authopt();
 	if (err)
 		return err;
@@ -717,12 +716,11 @@ int tcp_get_authopt_val(struct sock *sk, struct tcp_authopt *opt)
 	int err;
 
 	memset(opt, 0, sizeof(*opt));
-	sock_owned_by_me(sk);
 	err = check_sysctl_tcp_authopt();
 	if (err)
 		return err;
 
-	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	info = rcu_dereference_protected(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
 		return -ENOENT;
 
