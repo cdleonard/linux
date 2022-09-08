@@ -603,7 +603,7 @@ static struct tcp_authopt_info *__tcp_authopt_info_get_or_create(struct sock *sk
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tcp_authopt_info *info;
 
-	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	info = rcu_dereference_protected(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (info)
 		return info;
 
