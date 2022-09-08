@@ -1874,7 +1874,6 @@ int tcp_set_authopt_repair(struct sock *sk, sockptr_t optval, unsigned int optle
 	struct tcp_authopt_repair val;
 	int err;
 
-	sock_owned_by_me(sk);
 	err = check_sysctl_tcp_authopt();
 	if (err)
 		return err;
@@ -1891,7 +1890,7 @@ int tcp_set_authopt_repair(struct sock *sk, sockptr_t optval, unsigned int optle
 	if (sk->sk_state != TCP_ESTABLISHED)
 		return -EPERM;
 
-	info = rcu_dereference_check(tp->authopt_info, lockdep_sock_is_held(sk));
+	info = rcu_dereference_protected(tp->authopt_info, lockdep_sock_is_held(sk));
 	if (!info)
 		return -ENOENT;
 	if (!tp->repair)
